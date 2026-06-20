@@ -98,10 +98,16 @@ public class TableOperations {
 
         public int execute() {
             String key = generateKey(values);
-            ops.getData().computeIfAbsent(ops.getTableName(), k -> new java.util.HashMap<>());
+            Map<String, Object> dataMap = ops.getData();
+            if (dataMap == null) {
+                dataMap = new java.util.HashMap<>();
+            }
+            dataMap.computeIfAbsent(ops.getTableName(), k -> new java.util.HashMap<>());
             @SuppressWarnings("unchecked")
-            Map<String, Object> table = (Map<String, Object>) ops.getData().get(ops.getTableName());
-            table.put(key, values);
+            Map<String, Object> table = (Map<String, Object>) dataMap.get(ops.getTableName());
+            if (table != null) {
+                table.put(key, values);
+            }
             return 1;
         }
 
@@ -158,7 +164,12 @@ public class TableOperations {
 
         @SuppressWarnings("unchecked")
         public List<Map<String, Object>> execute() {
-            Object tableObj = ops.getData().get(ops.getTableName());
+            Map<String, Object> dataMap = ops.getData();
+            if (dataMap == null) {
+                return List.of();
+            }
+            
+            Object tableObj = dataMap.get(ops.getTableName());
             if (tableObj == null) {
                 return List.of();
             }

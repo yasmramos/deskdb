@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -22,15 +23,17 @@ public class DeskDB implements AutoCloseable {
 
     private final Path dbPath;
     private final Path walPath;
-    private final Map<String, Object> data;
+    private final Map<String, Table> tables;
     private final Map<String, TableSchema> schemas;
+    private final Map<String, Object> legacyData;  // Para compatibilidad con tests antiguos
     private boolean closed = false;
 
     private DeskDB(Path dbPath) throws IOException {
         this.dbPath = dbPath;
         this.walPath = dbPath.getParent().resolve(dbPath.getFileName().toString() + ".wal");
-        this.data = new ConcurrentHashMap<>();
+        this.tables = new ConcurrentHashMap<>();
         this.schemas = new HashMap<>();
+        this.legacyData = new ConcurrentHashMap<>();
         
         // Recuperar desde WAL si existe
         if (Files.exists(walPath)) {
@@ -90,6 +93,46 @@ public class DeskDB implements AutoCloseable {
     }
 
     /**
+     * Crea una tabla con el esquema especificado.
+     *
+     * @param tableName Nombre de la tabla
+     * @param columns Columnas de la tabla
+     * @return Table para operar con la tabla creada
+     * @throws IOException si hay un error al crear la tabla
+     */
+    public Table createTable(String tableName, Column... columns) throws IOException {
+        checkClosed();
+        if (tables.containsKey(tableName)) {
+            throw new IllegalStateException("La tabla '" + tableName + "' ya existe");
+        }
+        
+        TableSchema schema = new TableSchema(tableName, List.of(columns));
+        registerSchema(tableName, schema);
+        
+        Table table = new Table(tableName, List.of(columns), dbPath.toString());
+        tables.put(tableName, table);
+        
+        logger.info("Tabla '{}' creada con {} columnas", tableName, columns.length);
+        return table;
+    }
+
+    /**
+     * Obtiene una tabla existente por nombre.
+     *
+     * @param tableName Nombre de la tabla
+     * @return Table existente
+     * @throws IllegalStateException si la tabla no existe
+     */
+    public Table getTable(String tableName) {
+        checkClosed();
+        Table table = tables.get(tableName);
+        if (table == null) {
+            throw new IllegalStateException("La tabla '" + tableName + "' no existe");
+        }
+        return table;
+    }
+
+    /**
      * Cierra la base de datos y persiste los datos en disco.
      *
      * @throws IOException si hay un error al guardar
@@ -133,9 +176,17 @@ public class DeskDB implements AutoCloseable {
 
     /**
      * Obtiene el mapa de datos interno (para uso interno).
+     * Legacy para compatibilidad con tests antiguos.
      */
     Map<String, Object> getData() {
-        return data;
+        return legacyData;
+    }
+
+    /**
+     * Obtiene el mapa de tablas interno.
+     */
+    Map<String, Table> getTables() {
+        return tables;
     }
 
     /**
@@ -159,14 +210,15 @@ public class DeskDB implements AutoCloseable {
     }
 
     private void loadFromFile() throws IOException {
+        // Legacy: cargar datos antiguos si existen
         try {
             byte[] content = Files.readAllBytes(dbPath);
             if (content.length > 0) {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> loadedData = objectMapper.readValue(content, Map.class);
-                data.clear();
-                data.putAll(loadedData);
-                logger.debug("Datos cargados desde {}", dbPath);
+                legacyData.clear();
+                legacyData.putAll(loadedData);
+                logger.debug("Datos legacy cargados desde {}", dbPath);
             }
         } catch (Exception e) {
             logger.warn("Error al cargar datos existentes, comenzando con DB vacía: {}", e.getMessage());
@@ -175,9 +227,12 @@ public class DeskDB implements AutoCloseable {
 
     private void saveToFile() throws IOException {
         synchronized (this) {
-            byte[] content = objectMapper.writeValueAsBytes(data);
-            Files.write(dbPath, content);
-            logger.debug("Datos guardados en {}", dbPath);
+            // Guardar datos legacy en el archivo principal
+            if (!legacyData.isEmpty()) {
+                byte[] content = objectMapper.writeValueAsBytes(legacyData);
+                Files.write(dbPath, content);
+                logger.debug("Datos guardados en {}", dbPath);
+            }
         }
     }
 }
