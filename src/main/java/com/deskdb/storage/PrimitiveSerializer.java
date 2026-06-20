@@ -1,5 +1,7 @@
 package com.deskdb.storage;
 
+import com.deskdb.core.DataType;
+
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
@@ -209,5 +211,78 @@ public final class PrimitiveSerializer {
         if (value < (1 << 21)) return 3;
         if (value < (1 << 28)) return 4;
         return 5;
+    }
+    
+    /**
+     * Escribe un valor genérico según su tipo de datos.
+     */
+    public static void write(ByteBuffer buffer, Object value, DataType type) {
+        if (value == null) {
+            buffer.put((byte) 0); // Null marker
+            return;
+        }
+        buffer.put((byte) 1); // Non-null marker
+        
+        switch (type) {
+            case BOOLEAN:
+                writeBoolean(buffer, (Boolean) value);
+                break;
+            case INT:
+                buffer.putInt((Integer) value);
+                break;
+            case LONG:
+                buffer.putLong((Long) value);
+                break;
+            case DOUBLE:
+                writeDouble(buffer, (Double) value);
+                break;
+            case STRING:
+                writeString(buffer, (String) value);
+                break;
+            case DATE:
+            case TIMESTAMP:
+                buffer.putLong((Long) value);
+                break;
+            case BLOB:
+                writeBytes(buffer, (byte[]) value);
+                break;
+            case JSON:
+                writeString(buffer, (String) value);
+                break;
+            default:
+                throw new IllegalArgumentException("Unsupported type: " + type);
+        }
+    }
+    
+    /**
+     * Lee un valor genérico según su tipo de datos.
+     */
+    public static Object read(ByteBuffer buffer, DataType type) {
+        byte nullMarker = buffer.get();
+        if (nullMarker == 0) {
+            return null;
+        }
+        
+        switch (type) {
+            case BOOLEAN:
+                return readBoolean(buffer);
+            case INT:
+                return buffer.getInt();
+            case LONG:
+                return buffer.getLong();
+            case DOUBLE:
+                return readDouble(buffer);
+            case STRING:
+                return readString(buffer);
+            case DATE:
+            case TIMESTAMP:
+                return buffer.getLong();
+            case BLOB:
+                return readBytes(buffer);
+            case JSON:
+                return readString(buffer);
+            default:
+                throw new IllegalArgumentException("Unsupported type: " + type);
+        }
     }
 }

@@ -87,6 +87,18 @@ public class PageManager {
     }
     
     /**
+     * Asigna una nueva página del tipo especificado.
+     * @param pageType Tipo de página (TYPE_DATA, TYPE_INDEX, TYPE_META)
+     * @return La página asignada
+     * @throws IOException Si ocurre un error de E/S
+     */
+    public Page allocatePage(int pageType) throws IOException {
+        Page page = allocatePage();
+        page.setFlags(pageType);
+        return page;
+    }
+    
+    /**
      * Libera una página para reutilización futura.
      */
     public void freePage(long pageNumber) throws IOException {

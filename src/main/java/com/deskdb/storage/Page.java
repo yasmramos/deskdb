@@ -287,4 +287,16 @@ public class Page {
             lock.readLock().unlock();
         }
     }
+    
+    /**
+     * Constantes para tipos de página.
+     */
+    public static final int TYPE_DATA = 0x01;
+    public static final int TYPE_INDEX = 0x02;
+    public static final int TYPE_META = 0x03;
+    
+    /**
+     * Tamaño del header de página.
+     */
+    public static final int PAGE_HEADER_SIZE = HEADER_SIZE;
 }
