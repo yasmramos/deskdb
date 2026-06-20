@@ -32,7 +32,11 @@ public class Table {
             }
         }
         
-        loadMetadata();
+        try {
+            loadMetadata();
+        } catch (ClassNotFoundException e) {
+            throw new IOException("Error cargando metadatos de la tabla", e);
+        }
     }
 
     private void loadMetadata() throws IOException, ClassNotFoundException {

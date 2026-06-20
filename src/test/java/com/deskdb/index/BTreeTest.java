@@ -57,7 +57,7 @@ public class BTreeTest {
         tree.insert(10, 100L);
         tree.insert(20, 200L);
         
-        assertTrue(tree.delete(10));
+        assertTrue(tree.delete(10, 100L));
         // La implementación actual solo decrementa el contador
         // no elimina realmente del árbol
         
@@ -115,7 +115,7 @@ public class BTreeTest {
         tree.insert(2, 2L);
         assertEquals(2, tree.size());
         
-        tree.delete(1);
+        tree.delete(1, 1L);
         assertEquals(1, tree.size());
     }
     
