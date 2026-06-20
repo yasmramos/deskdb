@@ -57,13 +57,16 @@ public class BTreeTest {
         tree.insert(10, 100L);
         tree.insert(20, 200L);
         
-        assertTrue(tree.delete(10, 100L));
-        // La implementación actual solo decrementa el contador
-        // no elimina realmente del árbol
+        assertTrue(tree.delete(10, 100L), "Should delete key 10 with value 100L");
         
-        // Verificar que todavía podemos buscar 20
-        List<Long> results = tree.search(20);
+        // Verify that key 10 is actually deleted
+        List<Long> results = tree.search(10);
+        assertFalse(results.contains(100L), "Key 10 should be deleted");
+        
+        // Verify that key 20 still exists
+        results = tree.search(20);
         assertTrue(results.size() >= 1);
+        assertTrue(results.contains(200L));
     }
     
     @Test
