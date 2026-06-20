@@ -236,4 +236,55 @@ public class Page {
     public int getDataCapacity() {
         return PAGE_SIZE - HEADER_SIZE;
     }
+    
+    /**
+     * Obtiene el ByteBuffer subyacente para acceso directo.
+     */
+    public ByteBuffer getByteBuffer() {
+        lock.readLock().lock();
+        try {
+            // Duplicar para permitir posición independiente
+            return buffer.duplicate();
+        } finally {
+            lock.readLock().unlock();
+        }
+    }
+    
+    /**
+     * Incrementa el contador de filas en la página.
+     */
+    public void incrementRowCount() {
+        lock.writeLock().lock();
+        try {
+            int current = buffer.getInt(HEADER_SIZE);
+            buffer.putInt(HEADER_SIZE, current + 1);
+            dirty = true;
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+    
+    /**
+     * Marca la página como sucia (necesita ser escrita a disco).
+     */
+    public void setDirty(boolean dirty) {
+        lock.writeLock().lock();
+        try {
+            this.dirty = dirty;
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+    
+    /**
+     * Verifica si la página está sucia.
+     */
+    public boolean isDirty() {
+        lock.readLock().lock();
+        try {
+            return dirty;
+        } finally {
+            lock.readLock().unlock();
+        }
+    }
 }

@@ -156,4 +156,22 @@ public class PageManager {
             cacheLock.writeLock().unlock();
         }
     }
+    
+    /**
+     * Obtiene el offset actual dentro de una página.
+     * Simplificación: retorna el tamaño usado basado en el contador de filas.
+     */
+    public long getCurrentOffset(Page page) {
+        // Offset = (pageNumber * PAGE_SIZE) + HEADER_SIZE + (rowCount * estimatedRowSize)
+        // Por simplicidad, usamos un offset fijo después del header
+        return page.getPageNumber() * Page.PAGE_SIZE + 16;
+    }
+    
+    /**
+     * Obtiene la página que contiene un offset dado.
+     */
+    public Page getPageForOffset(long offset) throws IOException {
+        long pageNumber = offset / Page.PAGE_SIZE;
+        return getPage(pageNumber);
+    }
 }
