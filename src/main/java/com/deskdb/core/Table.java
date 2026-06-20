@@ -1,6 +1,7 @@
 package com.deskdb.core;
 
 import com.deskdb.index.BTree;
+import com.deskdb.query.QueryOptimizer;
 import com.deskdb.storage.DataFile;
 
 import java.io.*;
@@ -179,6 +180,74 @@ public class Table {
                 return val != null && val instanceof Comparable
                     && ((Comparable) val).compareTo(from) >= 0
                     && ((Comparable) val).compareTo(to) <= 0;
+            })
+            .collect(Collectors.toList());
+    }
+
+    /**
+     * Busca filas aplicando filtros y usando índices si están disponibles.
+     */
+    public List<Row> select(List<Filter> filters) throws IOException {
+        if (filters == null || filters.isEmpty()) {
+            return scanAll();
+        }
+
+        // Usar el optimizador para decidir si usar índice
+        QueryOptimizer optimizer = new QueryOptimizer();
+        QueryOptimizer.QueryPlan plan = optimizer.optimize(this, filters);
+
+        if (plan.isUseIndex() && plan.getIndex().isPresent()) {
+            // Ejecutar consulta usando el índice seleccionado
+            BTree index = plan.getIndex().get();
+            Filter filter = plan.getFilter();
+            List<Long> rowIds;
+
+            switch (filter.getOperator()) {
+                case EQ:
+                    rowIds = index.search((Comparable) filter.getValue());
+                    break;
+                case GT:
+                    // Para >, necesitamos un valor ligeramente mayor, usamos rangeSearch desde el valor
+                    rowIds = index.rangeSearch((Comparable) filter.getValue(), null);
+                    break;
+                case LT:
+                    rowIds = index.rangeSearch(null, (Comparable) filter.getValue());
+                    break;
+                case GTE:
+                case LTE:
+                    // Para >= y <=, incluimos el valor exacto en el rango
+                    // Esto requiere una lógica más compleja, por ahora fallback a scan
+                    return applyFilters(scanAll(), filters);
+                default:
+                    // Fallback a scan completo si el tipo no es soportado directamente por el índice
+                    return applyFilters(scanAll(), filters);
+            }
+
+            // Leer las filas y aplicar el resto de filtros si los hay
+            List<Row> results = dataFile.readRows(rowIds);
+            if (filters.size() > 1) {
+                // Aplicar filtros adicionales en memoria
+                return applyFilters(results, filters);
+            }
+            return results;
+        } else {
+            // No hay índice útil, hacer scan completo y filtrar
+            return applyFilters(scanAll(), filters);
+        }
+    }
+
+    /**
+     * Aplica una lista de filtros a un conjunto de filas.
+     */
+    private List<Row> applyFilters(List<Row> rows, List<Filter> filters) {
+        return rows.stream()
+            .filter(row -> {
+                for (Filter filter : filters) {
+                    if (!filter.apply(row)) {
+                        return false;
+                    }
+                }
+                return true;
             })
             .collect(Collectors.toList());
     }
