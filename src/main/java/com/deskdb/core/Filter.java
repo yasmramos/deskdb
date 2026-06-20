@@ -67,6 +67,13 @@ public class Filter {
         }
     }
 
+    /**
+     * Verifica si una fila coincide con este filtro.
+     */
+    public boolean apply(Row row) {
+        return matches(row.getValues());
+    }
+
     private boolean safeEquals(Object a, Object b) {
         if (a == null && b == null) return true;
         if (a == null || b == null) return false;

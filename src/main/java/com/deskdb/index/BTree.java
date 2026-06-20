@@ -209,13 +209,17 @@ public class BTree<K extends Comparable<K>, V> {
     }
     
     @SuppressWarnings("unchecked")
-    public boolean delete(K key) {
-        boolean removed = delete(root, key);
-        if (removed) size--;
-        return removed;
+    public boolean delete(K key, long value) {
+        List<Long> values = search(key);
+        if (values.contains(value)) {
+            boolean removed = delete(root, key, value);
+            if (removed) size--;
+            return true;
+        }
+        return false;
     }
     
-    private boolean delete(Node node, K key) {
+    private boolean delete(Node node, K key, long value) {
         int idx = 0;
         while (idx < node.keys.size() && ((Comparable<K>) node.keys.get(idx)).compareTo(key) < 0) {
             idx++;
@@ -223,21 +227,25 @@ public class BTree<K extends Comparable<K>, V> {
         
         if (idx < node.keys.size() && ((Comparable<K>) node.keys.get(idx)).compareTo(key) == 0) {
             if (node.isLeaf) {
-                node.keys.remove(idx);
-                node.values.remove(idx);
-                return true;
+                int valIdx = node.values.indexOf(value);
+                if (valIdx >= 0) {
+                    node.keys.remove(idx);
+                    node.values.remove(valIdx);
+                    return true;
+                }
+                return false;
             } else {
                 K predecessor = findMax(node.children.get(idx));
                 if (predecessor != null) {
                     node.keys.set(idx, predecessor);
-                    delete(node.children.get(idx), predecessor);
+                    delete(node.children.get(idx), predecessor, value);
                     return true;
                 }
             }
         }
         
         if (!node.isLeaf && idx < node.children.size()) {
-            return delete(node.children.get(idx), key);
+            return delete(node.children.get(idx), key, value);
         }
         
         return false;
@@ -265,7 +273,7 @@ public class BTree<K extends Comparable<K>, V> {
         size = 0;
     }
     
-    public void persist(ObjectOutput out) throws IOException {
+    public void persist(DataOutputStream out) throws IOException {
         out.writeUTF(name);
         out.writeInt(order);
         out.writeInt(size);
@@ -273,12 +281,13 @@ public class BTree<K extends Comparable<K>, V> {
     }
     
     @SuppressWarnings("unchecked")
-    private void persistNode(ObjectOutput out, Node node) throws IOException {
+    private void persistNode(DataOutputStream out, Node node) throws IOException {
+        ObjectOutputStream oos = new ObjectOutputStream(out);
         out.writeBoolean(node.isLeaf);
         out.writeInt(node.keys.size());
         
         for (int i = 0; i < node.keys.size(); i++) {
-            out.writeObject(node.keys.get(i));
+            oos.writeObject(node.keys.get(i));
             out.writeLong(node.values.get(i));
         }
         
@@ -287,24 +296,26 @@ public class BTree<K extends Comparable<K>, V> {
                 persistNode(out, child);
             }
         }
+        oos.flush();
     }
     
     @SuppressWarnings("unchecked")
-    public void load(ObjectInput in) throws IOException, ClassNotFoundException {
+    public void load(DataInputStream in) throws IOException, ClassNotFoundException {
         this.name = in.readUTF();
         this.order = in.readInt();
         this.size = in.readInt();
         this.root = loadNode(in);
     }
     
-    private Node loadNode(ObjectInput in) throws IOException, ClassNotFoundException {
+    private Node loadNode(DataInputStream in) throws IOException, ClassNotFoundException {
+        ObjectInputStream ois = new ObjectInputStream(in);
         boolean isLeaf = in.readBoolean();
         int keyCount = in.readInt();
         
         Node node = new Node(isLeaf, 2 * order - 1);
         
         for (int i = 0; i < keyCount; i++) {
-            node.keys.add(in.readObject());
+            node.keys.add(ois.readObject());
             node.values.add(in.readLong());
         }
         
