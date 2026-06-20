@@ -22,7 +22,7 @@ public class Table {
         this.name = name;
         this.columns = new ArrayList<>(columns);
         this.indexes = new HashMap<>();
-        this.dataFile = new DataFile(dbPath + "." + name + ".dat");
+        this.dataFile = new DataFile(dbPath + "." + name + ".dat", columns);
         
         // Crear índice automático para PRIMARY KEY
         for (Column col : columns) {
