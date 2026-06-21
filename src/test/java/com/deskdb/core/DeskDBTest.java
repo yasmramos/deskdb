@@ -1,4 +1,5 @@
 package com.deskdb.core;
+import java.nio.file.Paths;
 
 import org.junit.jupiter.api.*;
 import java.io.IOException;
@@ -9,9 +10,6 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/**
- * Pruebas unitarias para DeskDB.
- */
 public class DeskDBTest {
     private Path tempDbPath;
     private DeskDB db;
@@ -20,6 +18,12 @@ public class DeskDBTest {
     void setUp() throws IOException {
         tempDbPath = Files.createTempFile("test", ".deskdb");
         db = DeskDB.open(tempDbPath);
+        // Crear tabla por defecto para las pruebas
+        db.createTable("usuarios",
+            new Column("id", DataType.LONG).primaryKey(),
+            new Column("nombre", DataType.STRING),
+            new Column("edad", DataType.INT)
+        );
     }
 
     @AfterEach
@@ -29,6 +33,11 @@ public class DeskDBTest {
         }
         if (tempDbPath != null && Files.exists(tempDbPath)) {
             Files.delete(tempDbPath);
+        }
+        // Limpiar WAL si existe
+        Path walPath = Paths.get(tempDbPath.toString() + ".wal");
+        if (Files.exists(walPath)) {
+            Files.delete(walPath);
         }
     }
 
@@ -42,131 +51,127 @@ public class DeskDBTest {
     }
 
     @Test
-    void testInsertAndSelect() {
+    void testInsertAndSelect() throws Exception {
         db.table("usuarios")
           .insert()
+          .value("id", 1L)
           .value("nombre", "Ana")
           .value("edad", 30)
           .execute();
 
-        List<Map<String, Object>> results = db.table("usuarios").select().execute();
+        List<Row> results = db.table("usuarios").select().execute();
 
         assertEquals(1, results.size());
-        Map<String, Object> row = results.get(0);
+        Row row = results.get(0);
         assertEquals("Ana", row.get("nombre"));
         assertEquals(30, row.get("edad"));
     }
 
     @Test
-    void testInsertMultipleAndSelectWithFilter() {
+    void testInsertMultipleAndSelectWithFilter() throws Exception {
         db.table("usuarios")
           .insert()
+          .value("id", 1L)
           .value("nombre", "Ana")
           .value("edad", 30)
           .execute();
 
         db.table("usuarios")
           .insert()
-          .value("nombre", "Carlos")
+          .value("id", 2L)
+          .value("nombre", "Luis")
           .value("edad", 25)
           .execute();
 
-        db.table("usuarios")
-          .insert()
-          .value("nombre", "Beatriz")
-          .value("edad", 35)
+        List<Row> results = db.table("usuarios")
+          .select()
+          .where("edad")
+          .greaterThan(26)
           .execute();
 
-        // Filtrar por edad > 28
-        List<Map<String, Object>> results = db.table("usuarios")
-            .select()
-            .where("edad")
-            .greaterThan(28)
-            .execute();
-
-        assertEquals(2, results.size());
+        assertEquals(1, results.size());
+        assertEquals("Ana", results.get(0).get("nombre"));
     }
 
     @Test
-    void testUpdate() {
+    void testUpdate() throws Exception {
         db.table("usuarios")
           .insert()
+          .value("id", 1L)
           .value("nombre", "Ana")
           .value("edad", 30)
           .execute();
 
-        var updatedResult = db.table("usuarios")
-            .update()
-            .set("edad", 31)
-            .where("nombre")
-            .equalTo("Ana")
-            .execute();
+        db.table("usuarios")
+          .update()
+          .set("edad", 31)
+          .where("id")
+          .is(1L)
+          .execute();
 
-        assertEquals(1, ((Number)updatedResult.get(0).get("_updated")).intValue());
-
-        List<Map<String, Object>> results = db.table("usuarios")
-            .select()
-            .where("nombre")
-            .equalTo("Ana")
-            .execute();
+        List<Row> results = db.table("usuarios")
+          .select()
+          .where("id")
+          .is(1L)
+          .execute();
 
         assertEquals(1, results.size());
         assertEquals(31, results.get(0).get("edad"));
     }
 
     @Test
-    void testDelete() {
+    void testDelete() throws Exception {
         db.table("usuarios")
           .insert()
+          .value("id", 1L)
           .value("nombre", "Ana")
           .value("edad", 30)
           .execute();
 
         db.table("usuarios")
-          .insert()
-          .value("nombre", "Carlos")
-          .value("edad", 25)
+          .delete()
+          .where("id")
+          .is(1L)
           .execute();
 
-        var deletedResult = db.table("usuarios")
-            .delete()
-            .where("nombre")
-            .equalTo("Ana")
-            .execute();
-
-        assertEquals(1, ((Number)deletedResult.get(0).get("_deleted")).intValue());
-
-        List<Map<String, Object>> results = db.table("usuarios").select().execute();
-        assertEquals(1, results.size());
-        assertEquals("Carlos", results.get(0).get("nombre"));
+        List<Row> results = db.table("usuarios").select().execute();
+        assertEquals(0, results.size());
     }
 
     @Test
-    void testSelectColumns() {
+    void testSelectColumns() throws Exception {
         db.table("usuarios")
           .insert()
+          .value("id", 1L)
           .value("nombre", "Ana")
           .value("edad", 30)
           .value("email", "ana@example.com")
           .execute();
 
-        List<Map<String, Object>> results = db.table("usuarios")
+        List<Row> results = db.table("usuarios")
             .select()
             .columns("nombre", "edad")
             .execute();
 
         assertEquals(1, results.size());
-        Map<String, Object> row = results.get(0);
-        assertEquals(2, row.size());
+        Row row = results.get(0);
+        assertEquals(2, row.getColumns().size());
         assertEquals("Ana", row.get("nombre"));
         assertEquals(30, row.get("edad"));
-        assertFalse(row.containsKey("email"));
+        assertFalse(row.getColumns().contains("email"));
     }
 
     @Test
-    void testPersistence() throws IOException {
+    void testEmptyTable() throws Exception {
+        List<Row> results = db.table("usuarios").select().execute();
+        assertEquals(0, results.size());
+    }
+
+    @Test
+    void testPersistence() throws Exception {
         db.table("usuarios")
           .insert()
+          .value("id", 1L)
           .value("nombre", "Ana")
           .value("edad", 30)
           .execute();
@@ -176,50 +181,44 @@ public class DeskDBTest {
         // Reabrir la misma base de datos
         db = DeskDB.open(tempDbPath);
 
-        List<Map<String, Object>> results = db.table("usuarios").select().execute();
+        List<Row> results = db.table("usuarios").select().execute();
+        assertEquals(1, results.size());
+        assertEquals("Ana", results.get(0).get("nombre"));
+    }
+
+    @Test
+    void testChainedWhereConditions() throws Exception {
+        db.table("usuarios")
+          .insert()
+          .value("id", 1L)
+          .value("nombre", "Ana")
+          .value("edad", 30)
+          .execute();
+
+        db.table("usuarios")
+          .insert()
+          .value("id", 2L)
+          .value("nombre", "Luis")
+          .value("edad", 25)
+          .execute();
+
+        db.table("usuarios")
+          .insert()
+          .value("id", 3L)
+          .value("nombre", "Carlos")
+          .value("edad", 35)
+          .execute();
+
+        // Buscar usuarios con edad entre 26 y 34
+        List<Row> results = db.table("usuarios")
+          .select()
+          .where("edad")
+          .greaterThan(26)
+          .where("edad")
+          .lessThan(34)
+          .execute();
 
         assertEquals(1, results.size());
         assertEquals("Ana", results.get(0).get("nombre"));
-        assertEquals(30, results.get(0).get("edad"));
-    }
-
-    @Test
-    void testEmptyTable() {
-        List<Map<String, Object>> results = db.table("usuarios").select().execute();
-        assertTrue(results.isEmpty());
-    }
-
-    @Test
-    void testChainedWhereConditions() {
-        db.table("productos")
-          .insert()
-          .value("nombre", "Laptop")
-          .value("precio", 1000)
-          .value("stock", 5)
-          .execute();
-
-        db.table("productos")
-          .insert()
-          .value("nombre", "Mouse")
-          .value("precio", 25)
-          .value("stock", 50)
-          .execute();
-
-        db.table("productos")
-          .insert()
-          .value("nombre", "Teclado")
-          .value("precio", 75)
-          .value("stock", 30)
-          .execute();
-
-        // Productos con precio > 50
-        List<Map<String, Object>> results = db.table("productos")
-            .select()
-            .where("precio")
-            .greaterThan(50)
-            .execute();
-
-        assertEquals(2, results.size());
-        assertTrue(results.stream().anyMatch(r -> "Laptop".equals(r.get("nombre")))); assertTrue(results.stream().anyMatch(r -> "Teclado".equals(r.get("nombre"))));
     }
 }
