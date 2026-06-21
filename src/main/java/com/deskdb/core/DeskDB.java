@@ -157,7 +157,7 @@ public class DeskDB implements AutoCloseable {
      */
     public Transaction beginTransaction() throws IOException {
         checkClosed();
-        return new Transaction(this, walPath);
+        return new Transaction(this);
     }
 
     /**
