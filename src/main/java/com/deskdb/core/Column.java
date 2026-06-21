@@ -43,4 +43,8 @@ public class Column {
     public boolean isNotNull() { return notNull; }
     public boolean isUnique() { return unique; }
     public Object getDefaultValue() { return defaultValue; }
+    
+    // Setters para deserialización
+    void setPrimaryKey(boolean primaryKey) { this.primaryKey = primaryKey; }
+    void setNotNull(boolean notNull) { this.notNull = notNull; }
 }

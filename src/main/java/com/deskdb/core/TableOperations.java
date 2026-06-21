@@ -76,15 +76,15 @@ public class TableOperations {
     }
 
     /**
-     * Obtiene el mapa de datos de la DB.
+     * Obtiene la tabla por nombre.
      */
-    Map<String, Object> getData() {
-        return db.getData();
+    Table getTable() {
+        return db.getTable(tableName);
     }
 
     // Builder para INSERT
     public static class InsertBuilder {
-        private final TableOperations ops;
+        final TableOperations ops;
         private final Map<String, Object> values = new java.util.HashMap<>();
 
         InsertBuilder(TableOperations ops) {
@@ -97,28 +97,21 @@ public class TableOperations {
         }
 
         public int execute() {
-            String key = generateKey(values);
-            Map<String, Object> dataMap = ops.getData();
-            if (dataMap == null) {
-                dataMap = new java.util.HashMap<>();
+            try {
+                Table table = ops.getTable();
+                Row row = new Row(System.nanoTime(), values);
+                table.insert(row);
+                return 1;
+            } catch (Exception e) {
+                throw new RuntimeException("Error al insertar", e);
             }
-            dataMap.computeIfAbsent(ops.getTableName(), k -> new java.util.HashMap<>());
-            @SuppressWarnings("unchecked")
-            Map<String, Object> table = (Map<String, Object>) dataMap.get(ops.getTableName());
-            if (table != null) {
-                table.put(key, values);
-            }
-            return 1;
         }
-
-        private String generateKey(Map<String, Object> values) {
-            return java.util.UUID.randomUUID().toString();
         }
     }
 
     // Builder para SELECT
     public static class SelectBuilder {
-        private final TableOperations ops;
+        final TableOperations ops;
         private List<String> columns = new ArrayList<>();
 
         SelectBuilder(TableOperations ops) {
@@ -164,23 +157,37 @@ public class TableOperations {
 
         @SuppressWarnings("unchecked")
         public List<Map<String, Object>> execute() {
-            Map<String, Object> dataMap = ops.getData();
-            if (dataMap == null) {
-                return List.of();
+            try {
+                Table table = ops.getTable();
+                List<Row> rows = table.readAll();
+                List<Map<String, Object>> results = new ArrayList<>();
+                
+                for (Row row : rows) {
+                    Map<String, Object> values = row.getValues();
+                    if (matchesFilters(values)) {
+                        results.add(values);
+                    }
+                }
+                
+                return results;
+            } catch (Exception e) {
+                throw new RuntimeException("Error al seleccionar", e);
             }
-            
-            Object tableObj = dataMap.get(ops.getTableName());
-            if (tableObj == null) {
-                return List.of();
+        }
+        
+        private boolean matchesFilters(Map<String, Object> row) {
+            for (Filter filter : ops.filters) {
+                if (!filter.matches(row)) {
+                    return false;
+                }
             }
+            return true;
+        }
 
-            Map<String, Object> table = (Map<String, Object>) tableObj;
-            List<Map<String, Object>> results = new ArrayList<>();
-
-            for (Object rowObj : table.values()) {
-                if (!(rowObj instanceof Map)) continue;
-                Map<String, Object> row = (Map<String, Object>) rowObj;
-
+        @Override
+        public List<Map<String, Object>> execute() {
+            List<Map<String, Object>> results = new java.util.ArrayList<>();
+            for (Map<String, Object> row : ops.table.readAll()) {
                 if (matchesFilters(row)) {
                     if (columns.isEmpty()) {
                         results.add(new java.util.HashMap<>(row));
@@ -198,20 +205,11 @@ public class TableOperations {
 
             return results;
         }
-
-        private boolean matchesFilters(Map<String, Object> row) {
-            for (Filter filter : ops.getFilters()) {
-                if (!filter.matches(row)) {
-                    return false;
-                }
-            }
-            return true;
-        }
     }
 
     // Builder para UPDATE
     public static class UpdateBuilder {
-        private final TableOperations ops;
+        final TableOperations ops;
         private final Map<String, Object> values = new java.util.HashMap<>();
 
         UpdateBuilder(TableOperations ops) {
@@ -272,7 +270,7 @@ public class TableOperations {
 
     // Builder para DELETE
     public static class DeleteBuilder {
-        private final TableOperations ops;
+        final TableOperations ops;
 
         DeleteBuilder(TableOperations ops) {
             this.ops = ops;
@@ -396,4 +394,3 @@ public class TableOperations {
             return this;
         }
     }
-}

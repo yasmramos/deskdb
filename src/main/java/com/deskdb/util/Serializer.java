@@ -104,7 +104,11 @@ public class Serializer {
                     int objLen = in.readInt();
                     byte[] objBytes = new byte[objLen];
                     in.readFully(objBytes);
-                    value = deserializeObject(objBytes);
+                    try {
+                        value = deserializeObject(objBytes);
+                    } catch (ClassNotFoundException e) {
+                        throw new IOException("Error al deserializar objeto", e);
+                    }
                     break;
             }
             

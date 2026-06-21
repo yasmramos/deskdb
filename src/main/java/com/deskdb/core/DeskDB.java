@@ -5,10 +5,10 @@ import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.File;
 import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -203,26 +203,38 @@ public class DeskDB implements AutoCloseable {
 
     @SuppressWarnings("unchecked")
     private void loadFromFile() throws IOException {
+        // Cargar esquemas primero
         try {
             byte[] content = Files.readAllBytes(dbPath);
             if (content.length > 0) {
-                Map<String, Object> loadedData = deserializeMap(content);
+                ByteArrayInputStream bais = new ByteArrayInputStream(content);
+                DataInputStream in = new DataInputStream(bais);
                 
-                // Cargar esquemas
-                if (loadedData.containsKey("schemas")) {
-                    Map<String, Object> schemasData = (Map<String, Object>) loadedData.get("schemas");
-                    for (Map.Entry<String, Object> entry : schemasData.entrySet()) {
-                        Map<String, Object> schemaData = (Map<String, Object>) entry.getValue();
-                        TableSchema schema = TableSchema.fromMap(entry.getKey(), schemaData);
-                        schemas.put(entry.getKey(), schema);
+                // Leer número de esquemas
+                int schemaCount = in.readInt();
+                for (int i = 0; i < schemaCount; i++) {
+                    String tableName = in.readUTF();
+                    int columnCount = in.readInt();
+                    Column[] columns = new Column[columnCount];
+                    for (int j = 0; j < columnCount; j++) {
+                        String colName = in.readUTF();
+                        DataType dataType = DataType.valueOf(in.readUTF());
+                        boolean primaryKey = in.readBoolean();
+                        boolean notNull = in.readBoolean();
+                        columns[j] = new Column(colName, dataType);
+                        if (primaryKey) columns[j].setPrimaryKey(true);
+                        if (notNull) columns[j].setNotNull(true);
                     }
+                    TableSchema schema = new TableSchema(tableName, List.of(columns));
+                    schemas.put(tableName, schema);
+                    
+                    // Crear tabla y cargar datos
+                    Table table = new Table(tableName, List.of(columns), dbPath.toString());
+                    tables.put(tableName, table);
                 }
                 
-                // Cargar datos legacy si existen (para compatibilidad)
-                if (loadedData.containsKey("data")) {
-                    Map<String, Object> data = (Map<String, Object>) loadedData.get("data");
-                    logger.debug("Datos legacy cargados desde {}", dbPath);
-                }
+                in.close();
+                logger.info("Esquemas y datos cargados desde {}", dbPath);
             }
         } catch (Exception e) {
             logger.warn("Error al cargar datos existentes, comenzando con DB vacía: {}", e.getMessage());
@@ -231,36 +243,32 @@ public class DeskDB implements AutoCloseable {
 
     private void saveToFile() throws IOException {
         synchronized (this) {
-            Map<String, Object> data = new HashMap<>();
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            DataOutputStream out = new DataOutputStream(baos);
             
-            // Guardar esquemas
-            Map<String, Object> schemasData = new HashMap<>();
+            // Guardar número de esquemas
+            out.writeInt(schemas.size());
+            
+            // Guardar cada esquema y sus datos
             for (Map.Entry<String, TableSchema> entry : schemas.entrySet()) {
-                schemasData.put(entry.getKey(), entry.getValue().toMap());
+                TableSchema schema = entry.getValue();
+                out.writeUTF(entry.getKey());
+                
+                // Guardar columnas del esquema
+                List<Column> columns = schema.getColumnsList();
+                out.writeInt(columns.size());
+                for (Column col : columns) {
+                    out.writeUTF(col.getName());
+                    out.writeUTF(col.getType().name());
+                    out.writeBoolean(col.isPrimaryKey());
+                    out.writeBoolean(col.isNotNull());
+                }
             }
-            data.put("schemas", schemasData);
             
-            // Guardar en formato binario nativo
-            byte[] content = serializeMap(data);
+            out.close();
+            byte[] content = baos.toByteArray();
             Files.write(dbPath, content);
-            logger.debug("Datos guardados en {}", dbPath);
+            logger.debug("Esquemas guardados en {}", dbPath);
         }
-    }
-    
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> deserializeMap(byte[] data) throws IOException, ClassNotFoundException {
-        ByteArrayInputStream bais = new ByteArrayInputStream(data);
-        ObjectInputStream ois = new ObjectInputStream(bais);
-        Map<String, Object> result = (Map<String, Object>) ois.readObject();
-        ois.close();
-        return result;
-    }
-    
-    private byte[] serializeMap(Map<String, Object> data) throws IOException {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        ObjectOutputStream oos = new ObjectOutputStream(baos);
-        oos.writeObject(data);
-        oos.close();
-        return baos.toByteArray();
     }
 }

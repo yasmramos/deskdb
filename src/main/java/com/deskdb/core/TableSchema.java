@@ -78,4 +78,9 @@ public class TableSchema {
         result.put("columns", colsData);
         return result;
     }
+    
+    // Método auxiliar para obtener lista de columnas
+    public java.util.List<Column> getColumnsList() {
+        return new java.util.ArrayList<>(columns.values());
+    }
 }
