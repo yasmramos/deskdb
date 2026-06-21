@@ -1,10 +1,15 @@
-```
 # Java/Maven build artifacts
 target/
 *.class
 *.jar
 *.war
 *.ear
+
+# Test reports
+**/surefire-reports/
+
+# Maven status files
+**/maven-status/
 
 # Test reports
 **/surefire-reports/
@@ -61,4 +66,3 @@ build/
 *.tmp
 *.swp
 *~
-```target/
