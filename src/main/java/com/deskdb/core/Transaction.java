@@ -1,11 +1,14 @@
 package com.deskdb.core;
 
 import com.deskdb.storage.Wal;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -25,7 +28,6 @@ import java.util.concurrent.atomic.AtomicLong;
 public class Transaction implements AutoCloseable {
     private static final Logger logger = LoggerFactory.getLogger(Transaction.class);
     private static final AtomicLong transactionIdGenerator = new AtomicLong(0);
-    private static final ObjectMapper objectMapper = new ObjectMapper();
     
     private final DeskDB db;
     private final long transactionId;
@@ -91,7 +93,7 @@ public class Transaction implements AutoCloseable {
     void registerInsert(String tableName, String key, Map<String, Object> data) throws IOException {
         checkActive();
         
-        byte[] serializedData = objectMapper.writeValueAsBytes(data);
+        byte[] serializedData = serializeMap(data);
         wal.write(transactionId, Wal.OperationType.INSERT, tableName, key, serializedData);
         
         pendingOperations.add(new PendingOperation(OperationType.INSERT, tableName, key, data));
@@ -105,7 +107,7 @@ public class Transaction implements AutoCloseable {
     void registerUpdate(String tableName, String key, Map<String, Object> data) throws IOException {
         checkActive();
         
-        byte[] serializedData = objectMapper.writeValueAsBytes(data);
+        byte[] serializedData = serializeMap(data);
         wal.write(transactionId, Wal.OperationType.UPDATE, tableName, key, serializedData);
         
         pendingOperations.add(new PendingOperation(OperationType.UPDATE, tableName, key, data));
@@ -267,7 +269,7 @@ public class Transaction implements AutoCloseable {
                         dbData.computeIfAbsent(entry.tableName, k -> new java.util.HashMap<>());
                         Map<String, Object> insertTable = (Map<String, Object>) dbData.get(entry.tableName);
                         if (entry.data != null && entry.data.length > 0) {
-                            Map<String, Object> rowData = objectMapper.readValue(entry.data, Map.class);
+                            Map<String, Object> rowData = deserializeMap(entry.data);
                             insertTable.put(entry.key, rowData);
                         }
                         break;
@@ -278,7 +280,7 @@ public class Transaction implements AutoCloseable {
                             Map<String, Object> updateTable = (Map<String, Object>) tableObj;
                             if (updateTable.containsKey(entry.key)) {
                                 Map<String, Object> existingRow = (Map<String, Object>) updateTable.get(entry.key);
-                                Map<String, Object> updateData = objectMapper.readValue(entry.data, Map.class);
+                                Map<String, Object> updateData = deserializeMap(entry.data);
                                 existingRow.putAll(updateData);
                             }
                         }
@@ -309,5 +311,25 @@ public class Transaction implements AutoCloseable {
         try (Wal wal = Wal.open(walPath)) {
             wal.truncate();
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> deserializeMap(byte[] data) throws IOException, ClassNotFoundException {
+        if (data == null || data.length == 0) {
+            return new java.util.HashMap<>();
+        }
+        ByteArrayInputStream bais = new ByteArrayInputStream(data);
+        ObjectInputStream ois = new ObjectInputStream(bais);
+        Map<String, Object> result = (Map<String, Object>) ois.readObject();
+        ois.close();
+        return result;
+    }
+    
+    private static byte[] serializeMap(Map<String, Object> data) throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ObjectOutputStream oos = new ObjectOutputStream(baos);
+        oos.writeObject(data);
+        oos.close();
+        return baos.toByteArray();
     }
 }

@@ -1,11 +1,14 @@
 package com.deskdb.core;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -19,13 +22,11 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class DeskDB implements AutoCloseable {
     private static final Logger logger = LoggerFactory.getLogger(DeskDB.class);
-    private static final ObjectMapper objectMapper = new ObjectMapper();
 
     private final Path dbPath;
     private final Path walPath;
     private final Map<String, Table> tables;
     private final Map<String, TableSchema> schemas;
-    private final Map<String, Object> legacyData;  // Para compatibilidad con tests antiguos
     private boolean closed = false;
 
     private DeskDB(Path dbPath) throws IOException {
@@ -33,7 +34,6 @@ public class DeskDB implements AutoCloseable {
         this.walPath = dbPath.getParent().resolve(dbPath.getFileName().toString() + ".wal");
         this.tables = new ConcurrentHashMap<>();
         this.schemas = new HashMap<>();
-        this.legacyData = new ConcurrentHashMap<>();
         
         // Recuperar desde WAL si existe
         if (Files.exists(walPath)) {
@@ -175,14 +175,6 @@ public class DeskDB implements AutoCloseable {
     }
 
     /**
-     * Obtiene el mapa de datos interno (para uso interno).
-     * Legacy para compatibilidad con tests antiguos.
-     */
-    Map<String, Object> getData() {
-        return legacyData;
-    }
-
-    /**
      * Obtiene el mapa de tablas interno.
      */
     Map<String, Table> getTables() {
@@ -209,16 +201,28 @@ public class DeskDB implements AutoCloseable {
         }
     }
 
+    @SuppressWarnings("unchecked")
     private void loadFromFile() throws IOException {
-        // Legacy: cargar datos antiguos si existen
         try {
             byte[] content = Files.readAllBytes(dbPath);
             if (content.length > 0) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> loadedData = objectMapper.readValue(content, Map.class);
-                legacyData.clear();
-                legacyData.putAll(loadedData);
-                logger.debug("Datos legacy cargados desde {}", dbPath);
+                Map<String, Object> loadedData = deserializeMap(content);
+                
+                // Cargar esquemas
+                if (loadedData.containsKey("schemas")) {
+                    Map<String, Object> schemasData = (Map<String, Object>) loadedData.get("schemas");
+                    for (Map.Entry<String, Object> entry : schemasData.entrySet()) {
+                        Map<String, Object> schemaData = (Map<String, Object>) entry.getValue();
+                        TableSchema schema = TableSchema.fromMap(entry.getKey(), schemaData);
+                        schemas.put(entry.getKey(), schema);
+                    }
+                }
+                
+                // Cargar datos legacy si existen (para compatibilidad)
+                if (loadedData.containsKey("data")) {
+                    Map<String, Object> data = (Map<String, Object>) loadedData.get("data");
+                    logger.debug("Datos legacy cargados desde {}", dbPath);
+                }
             }
         } catch (Exception e) {
             logger.warn("Error al cargar datos existentes, comenzando con DB vacía: {}", e.getMessage());
@@ -227,12 +231,36 @@ public class DeskDB implements AutoCloseable {
 
     private void saveToFile() throws IOException {
         synchronized (this) {
-            // Guardar datos legacy en el archivo principal
-            if (!legacyData.isEmpty()) {
-                byte[] content = objectMapper.writeValueAsBytes(legacyData);
-                Files.write(dbPath, content);
-                logger.debug("Datos guardados en {}", dbPath);
+            Map<String, Object> data = new HashMap<>();
+            
+            // Guardar esquemas
+            Map<String, Object> schemasData = new HashMap<>();
+            for (Map.Entry<String, TableSchema> entry : schemas.entrySet()) {
+                schemasData.put(entry.getKey(), entry.getValue().toMap());
             }
+            data.put("schemas", schemasData);
+            
+            // Guardar en formato binario nativo
+            byte[] content = serializeMap(data);
+            Files.write(dbPath, content);
+            logger.debug("Datos guardados en {}", dbPath);
         }
+    }
+    
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> deserializeMap(byte[] data) throws IOException, ClassNotFoundException {
+        ByteArrayInputStream bais = new ByteArrayInputStream(data);
+        ObjectInputStream ois = new ObjectInputStream(bais);
+        Map<String, Object> result = (Map<String, Object>) ois.readObject();
+        ois.close();
+        return result;
+    }
+    
+    private byte[] serializeMap(Map<String, Object> data) throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ObjectOutputStream oos = new ObjectOutputStream(baos);
+        oos.writeObject(data);
+        oos.close();
+        return baos.toByteArray();
     }
 }

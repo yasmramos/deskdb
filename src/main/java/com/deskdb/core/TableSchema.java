@@ -44,4 +44,38 @@ public class TableSchema {
     public Column getColumn(String columnName) {
         return columns.get(columnName);
     }
+    
+    @SuppressWarnings("unchecked")
+    public static TableSchema fromMap(String name, Map<String, Object> data) {
+        List<Map<String, Object>> colsData = (List<Map<String, Object>>) data.get("columns");
+        java.util.List<Column> cols = new java.util.ArrayList<>();
+        for (Map<String, Object> colData : colsData) {
+            String colName = (String) colData.get("name");
+            DataType type = DataType.valueOf((String) colData.get("type"));
+            Column col = new Column(colName, type);
+            if (colData.containsKey("primaryKey")) {
+                col.setPrimaryKey((Boolean) colData.get("primaryKey"));
+            }
+            if (colData.containsKey("notNull")) {
+                col.setNotNull((Boolean) colData.get("notNull"));
+            }
+            cols.add(col);
+        }
+        return new TableSchema(name, cols);
+    }
+    
+    public Map<String, Object> toMap() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        java.util.List<Map<String, Object>> colsData = new java.util.ArrayList<>();
+        for (Column col : columns.values()) {
+            Map<String, Object> colData = new LinkedHashMap<>();
+            colData.put("name", col.getName());
+            colData.put("type", col.getType().name());
+            colData.put("primaryKey", col.isPrimaryKey());
+            colData.put("notNull", col.isNotNull());
+            colsData.add(colData);
+        }
+        result.put("columns", colsData);
+        return result;
+    }
 }

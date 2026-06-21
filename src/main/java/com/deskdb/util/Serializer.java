@@ -1,8 +1,6 @@
 package com.deskdb.util;
 
 import com.deskdb.core.Row;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,34 +11,10 @@ import java.util.Map;
 
 /**
  * Utilidades para serialización y deserialización de objetos.
+ * Formato binario nativo sin dependencias externas.
  */
 public class Serializer {
     private static final Logger logger = LoggerFactory.getLogger(Serializer.class);
-    private static final ObjectMapper objectMapper = new ObjectMapper();
-
-    /**
-     * Serializa un objeto a bytes JSON.
-     */
-    public static byte[] serialize(Object obj) {
-        try {
-            return objectMapper.writeValueAsBytes(obj);
-        } catch (JsonProcessingException e) {
-            logger.error("Error al serializar objeto", e);
-            throw new RuntimeException("Error al serializar objeto", e);
-        }
-    }
-
-    /**
-     * Deserializa bytes JSON a un objeto.
-     */
-    public static <T> T deserialize(byte[] data, Class<T> clazz) {
-        try {
-            return objectMapper.readValue(data, clazz);
-        } catch (Exception e) {
-            logger.error("Error al deserializar bytes", e);
-            throw new RuntimeException("Error al deserializar bytes", e);
-        }
-    }
 
     /**
      * Serializa una fila a bytes binarios.
@@ -77,12 +51,11 @@ public class Serializer {
                 out.writeByte(5);
                 out.writeBoolean((Boolean) value);
             } else {
-                // Fallback a JSON para otros tipos
+                // Fallback a serialización binaria para otros tipos
                 out.writeByte(6);
-                String json = toJson(value);
-                byte[] jsonBytes = json.getBytes(StandardCharsets.UTF_8);
-                out.writeInt(jsonBytes.length);
-                out.write(jsonBytes);
+                byte[] objBytes = serializeObject(value);
+                out.writeInt(objBytes.length);
+                out.write(objBytes);
             }
         }
         
@@ -127,12 +100,11 @@ public class Serializer {
                 case 5: // BOOLEAN
                     value = in.readBoolean();
                     break;
-                case 6: // JSON/OBJECT
-                    int jsonLen = in.readInt();
-                    byte[] jsonBytes = new byte[jsonLen];
-                    in.readFully(jsonBytes);
-                    String json = new String(jsonBytes, StandardCharsets.UTF_8);
-                    value = fromJson(json, Object.class);
+                case 6: // OBJECT
+                    int objLen = in.readInt();
+                    byte[] objBytes = new byte[objLen];
+                    in.readFully(objBytes);
+                    value = deserializeObject(objBytes);
                     break;
             }
             
@@ -144,39 +116,31 @@ public class Serializer {
     }
 
     /**
-     * Deserializa bytes JSON a un Map.
+     * Serializa un objeto genérico a bytes (fallback).
+     * Usa serialización Java nativa para tipos complejos.
      */
     @SuppressWarnings("unchecked")
-    public static Map<String, Object> deserializeMap(byte[] data) {
-        try {
-            return objectMapper.readValue(data, Map.class);
-        } catch (Exception e) {
-            logger.error("Error al deserializar bytes a Map", e);
-            throw new RuntimeException("Error al deserializar bytes a Map", e);
+    private static byte[] serializeObject(Object obj) throws IOException {
+        if (obj instanceof byte[]) {
+            return (byte[]) obj;
         }
+        
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ObjectOutputStream oos = new ObjectOutputStream(baos);
+        oos.writeObject(obj);
+        oos.close();
+        return baos.toByteArray();
     }
 
     /**
-     * Convierte un objeto a string JSON.
+     * Deserializa bytes a un objeto genérico (fallback).
      */
-    public static String toJson(Object obj) {
-        try {
-            return objectMapper.writeValueAsString(obj);
-        } catch (JsonProcessingException e) {
-            logger.error("Error al convertir objeto a JSON", e);
-            throw new RuntimeException("Error al convertir objeto a JSON", e);
-        }
-    }
-
-    /**
-     * Parsea un string JSON a un objeto.
-     */
-    public static <T> T fromJson(String json, Class<T> clazz) {
-        try {
-            return objectMapper.readValue(json, clazz);
-        } catch (JsonProcessingException e) {
-            logger.error("Error al parsear JSON", e);
-            throw new RuntimeException("Error al parsear JSON", e);
-        }
+    @SuppressWarnings("unchecked")
+    private static <T> T deserializeObject(byte[] data) throws IOException, ClassNotFoundException {
+        ByteArrayInputStream bais = new ByteArrayInputStream(data);
+        ObjectInputStream ois = new ObjectInputStream(bais);
+        T obj = (T) ois.readObject();
+        ois.close();
+        return obj;
     }
 }
