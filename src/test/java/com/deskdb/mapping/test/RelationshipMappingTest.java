@@ -50,7 +50,7 @@ public class RelationshipMappingTest {
         @Column(name = "title")
         public String title;
 
-        @ManyToOne(targetEntity = Author.class, joinColumn = "author_id")
+        @ManyToOne(targetEntity = Author.class, joinColumn = @JoinColumn(name = "author_id"))
         public Author author;
 
         public Book() {}

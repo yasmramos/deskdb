@@ -6,23 +6,18 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Specifies a many-to-many relationship between entities.
+ * Specifies a many-to-many relationship.
  */
-@Target({ElementType.FIELD, ElementType.METHOD})
+@Target(ElementType.FIELD)
 @Retention(RetentionPolicy.RUNTIME)
 public @interface ManyToMany {
     /**
-     * The entity class that is the target of the relationship.
-     */
-    Class<?> targetEntity() default void.class;
-
-    /**
-     * The join table used to store the relationship.
-     */
-    JoinTable joinTable() default @JoinTable;
-
-    /**
-     * The name of the field in the target entity that owns the relationship.
+     * The field that owns the relationship.
      */
     String mappedBy() default "";
+    
+    /**
+     * Whether to cascade persist operations.
+     */
+    boolean cascade() default true;
 }
