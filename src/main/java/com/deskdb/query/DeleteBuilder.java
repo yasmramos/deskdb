@@ -83,5 +83,10 @@ public class DeleteBuilder {
             parent.filter = new Filter(column, Filter.Operator.LTE, value);
             return parent;
         }
+
+        public DeleteBuilder eq(Object value) {
+            parent.filter = new Filter(column, Filter.Operator.EQ, value);
+            return parent;
+        }
     }
 }
