@@ -427,4 +427,17 @@ public class DeskDB implements AutoCloseable {
             out.writeUTF(value.toString());
         }
     }
+
+    /**
+     * Executes a native SQL-like query.
+     * @param sql SQL query string
+     * @param params Query parameters
+     * @return List of rows matching the query
+     * @throws Exception if query execution fails
+     */
+    public List<Row> executeQuery(String sql, Object... params) throws Exception {
+        // Simple implementation - just delegate to table operations
+        // This is a placeholder for a full SQL parser
+        throw new UnsupportedOperationException("Native query execution not yet implemented. Use table() API instead.");
+    }
 }

@@ -8,4 +8,8 @@ import java.lang.annotation.Target;
 @Target({ElementType.FIELD, ElementType.METHOD})
 @Retention(RetentionPolicy.RUNTIME)
 public @interface ManyToOne {
+    /**
+     * Whether to cascade persist operations.
+     */
+    boolean cascade() default true;
 }
