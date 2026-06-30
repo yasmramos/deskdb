@@ -53,7 +53,11 @@ public class DeskDBConnection implements Connection {
         
         if (!autoCommit && currentTransaction == null) {
             // Iniciar nueva transacción cuando se desactiva auto-commit
-            currentTransaction = db.beginTransaction();
+            try {
+                currentTransaction = db.beginTransaction();
+            } catch (Exception e) {
+                throw new SQLException("Error al iniciar transacción", e);
+            }
         } else if (autoCommit && currentTransaction != null) {
             // Commit y cerrar transacción actual si se activa auto-commit
             commit();
@@ -398,7 +402,12 @@ public class DeskDBConnection implements Connection {
      */
     public Transaction getOrCreateTransaction() {
         if (currentTransaction == null && !autoCommit) {
-            currentTransaction = db.beginTransaction();
+            try {
+                currentTransaction = db.beginTransaction();
+            } catch (Exception e) {
+                // Manejar la excepción silenciosamente o lanzar una RuntimeException
+                throw new RuntimeException("Error al crear transacción", e);
+            }
         }
         return currentTransaction;
     }
