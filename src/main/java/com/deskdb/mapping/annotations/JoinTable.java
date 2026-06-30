@@ -6,23 +6,23 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Specifies a join table for a many-to-many relationship.
+ * Specifies a join table for many-to-many relationships.
  */
-@Target({ElementType.FIELD, ElementType.METHOD})
+@Target(ElementType.FIELD)
 @Retention(RetentionPolicy.RUNTIME)
 public @interface JoinTable {
     /**
      * The name of the join table.
      */
-    String name() default "";
-
+    String name();
+    
     /**
-     * The join column for the owning side of the relationship.
+     * The name of the join column for the owning entity.
      */
-    JoinColumn joinColumns() default @JoinColumn;
-
+    String joinColumnName() default "";
+    
     /**
-     * The inverse join column for the non-owning side of the relationship.
+     * The name of the inverse join column for the related entity.
      */
-    JoinColumn inverseJoinColumns() default @JoinColumn;
+    String inverseJoinColumnName() default "";
 }

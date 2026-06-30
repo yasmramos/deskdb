@@ -6,11 +6,11 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Specifies a many-to-many relationship.
+ * Specifies a one-to-one relationship.
  */
 @Target(ElementType.FIELD)
 @Retention(RetentionPolicy.RUNTIME)
-public @interface ManyToMany {
+public @interface OneToOne {
     /**
      * The field that owns the relationship.
      */
