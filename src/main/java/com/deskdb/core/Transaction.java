@@ -120,18 +120,18 @@ public class Transaction implements AutoCloseable {
     }
 
     /**
-     * Recupera el estado de la base de datos desde el WAL.
-     * Esta es una implementación simplificada que solo elimina el WAL si existe.
+     * Recovers the database state from the WAL.
+     * This is a simplified implementation that only deletes the WAL if it exists.
      */
     public static void recover(DeskDB db, Path walPath) throws IOException {
-        // Implementación simplificada: en producción, leería el WAL y aplicaría las operaciones
-        // pendientes confirmadas. Por ahora, solo eliminamos el WAL asumiendo que fue procesado.
-        logger.info("Recuperando desde WAL: {}", walPath);
+        // Simplified implementation: in production, it would read the WAL and apply pending committed operations
+        // For now, we just delete the WAL assuming it was processed.
+        logger.info("Recovering from WAL: {}", walPath);
         if (Files.exists(walPath)) {
-            // Aquí iría la lógica real de replay del WAL
-            // Por simplicidad, lo eliminamos para evitar errores en siguientes aperturas
+            // Real WAL replay logic would go here
+            // For simplicity, we delete it to avoid errors on subsequent opens
             Files.delete(walPath);
-            logger.info("WAL eliminado tras recuperación simulada");
+            logger.info("WAL deleted after simulated recovery");
         }
     }
     

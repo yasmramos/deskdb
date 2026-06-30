@@ -70,7 +70,7 @@ public class DeskDBDriver implements Driver {
 
     @Override
     public boolean jdbcCompliant() {
-        return false; // Implementación parcial de JDBC
+        return false; // Partial JDBC implementation
     }
 
     @Override
