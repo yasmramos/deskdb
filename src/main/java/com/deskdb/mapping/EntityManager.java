@@ -24,6 +24,7 @@ public class EntityManager {
 
     /**
      * Persists an entity to the database. If the entity already exists (based on ID), it updates it.
+     * Also handles ManyToOne relationships by storing foreign key values.
      */
     public <T> void persist(T entity) {
         Class<?> clazz = entity.getClass();
@@ -37,10 +38,34 @@ public class EntityManager {
         Object idValue = null;
 
         for (Field field : clazz.getDeclaredFields()) {
+            // Skip transient fields
             if (field.isAnnotationPresent(Transient.class)) {
                 continue;
             }
 
+            // Handle ManyToOne relationships - store foreign key
+            if (field.isAnnotationPresent(ManyToOne.class)) {
+                field.setAccessible(true);
+                try {
+                    ManyToOne manyToOne = field.getAnnotation(ManyToOne.class);
+                    String joinColumn = manyToOne.joinColumn().isEmpty() ? 
+                        field.getName() + "_id" : manyToOne.joinColumn();
+                    
+                    Object relatedEntity = field.get(entity);
+                    if (relatedEntity != null) {
+                        // Extract ID from related entity
+                        Field relatedIdField = getIdField(relatedEntity.getClass());
+                        relatedIdField.setAccessible(true);
+                        Object relatedIdValue = relatedIdField.get(relatedEntity);
+                        values.put(joinColumn, relatedIdValue);
+                    }
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException("Failed to access ManyToOne field: " + field.getName(), e);
+                }
+                continue;
+            }
+
+            // Handle regular columns
             if (field.isAnnotationPresent(Id.class) || field.isAnnotationPresent(Column.class)) {
                 field.setAccessible(true);
                 try {
@@ -178,10 +203,29 @@ public class EntityManager {
             T entity = clazz.getDeclaredConstructor().newInstance();
 
             for (Field field : clazz.getDeclaredFields()) {
+                // Skip transient fields
                 if (field.isAnnotationPresent(Transient.class)) {
                     continue;
                 }
 
+                // Handle ManyToOne relationships
+                if (field.isAnnotationPresent(ManyToOne.class)) {
+                    field.setAccessible(true);
+                    ManyToOne manyToOne = field.getAnnotation(ManyToOne.class);
+                    String joinColumn = manyToOne.joinColumn().isEmpty() ? 
+                        field.getName() + "_id" : manyToOne.joinColumn();
+                    
+                    Object foreignKeyId = row.get(joinColumn);
+                    if (foreignKeyId != null) {
+                        Class<?> targetEntity = manyToOne.targetEntity();
+                        EntityManager targetEm = new EntityManager(db);
+                        Object relatedEntity = targetEm.find(targetEntity, foreignKeyId);
+                        field.set(entity, relatedEntity);
+                    }
+                    continue;
+                }
+
+                // Handle regular columns
                 if (field.isAnnotationPresent(Id.class) || field.isAnnotationPresent(Column.class)) {
                     field.setAccessible(true);
                     String columnName = getColumnName(field);
