@@ -85,24 +85,13 @@ public class RelationshipMappingTest {
         // Create and persist author
         Author author = new Author("J.K. Rowling");
         em.persist(author);
-        System.out.println("DEBUG: Author persisted with id=" + author.id);
 
         // Create and persist book with relationship
         Book book = new Book("Harry Potter", author);
         em.persist(book);
-        System.out.println("DEBUG: Book persisted with id=" + book.id);
-
-        // Check what's in the books table directly
-        var rows = db.table("books").select().execute();
-        System.out.println("DEBUG: Rows in books table: " + rows.size());
-        for (var row : rows) {
-            System.out.println("DEBUG: Row data: " + row.getValues());
-        }
 
         // Load book and verify relationship
         Book loadedBook = em.find(Book.class, book.id);
-        System.out.println("DEBUG: Loaded book: " + (loadedBook != null ? loadedBook.title : "null"));
-        System.out.println("DEBUG: Loaded book author: " + (loadedBook != null ? loadedBook.author : "null"));
         
         assertNotNull(loadedBook);
         assertEquals("Harry Potter", loadedBook.title);
