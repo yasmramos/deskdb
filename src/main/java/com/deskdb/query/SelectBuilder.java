@@ -136,6 +136,11 @@ public class SelectBuilder {
             parent.addFilter(new Filter(column, Filter.Operator.BETWEEN, from, to));
             return parent;
         }
+
+        public SelectBuilder eq(Object value) {
+            parent.addFilter(new Filter(column, Filter.Operator.EQ, value));
+            return parent;
+        }
     }
     
     // Clase WhereCondition para compatibilidad con TableOperations
@@ -175,6 +180,11 @@ public class SelectBuilder {
 
         public SelectBuilder between(Object from, Object to) {
             builder.addFilter(new Filter(column, Filter.Operator.BETWEEN, from, to));
+            return builder;
+        }
+
+        public SelectBuilder eq(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.EQ, value));
             return builder;
         }
     }

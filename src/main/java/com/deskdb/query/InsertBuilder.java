@@ -24,6 +24,16 @@ public class InsertBuilder {
         this.tableName = tableName;
     }
 
+    /**
+     * Inserts a map of values into the table.
+     */
+    public InsertBuilder insert(Map<String, Object> values) {
+        for (Map.Entry<String, Object> entry : values.entrySet()) {
+            this.values.put(entry.getKey(), entry.getValue());
+        }
+        return this;
+    }
+
     public InsertBuilder value(String column, Object value) {
         values.put(column, value);
         return this;
