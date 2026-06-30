@@ -264,6 +264,28 @@ public class DeskDBResultSet implements ResultSet {
     }
 
     @Override
+    public byte[] getBytes(int columnIndex) throws SQLException {
+        checkClosed();
+        validateColumnIndex(columnIndex);
+        String columnName = columnNames[columnIndex - 1];
+        Object value = getCurrentRow().get(columnName);
+        if (value == null) {
+            wasNull = true;
+            return null;
+        }
+        wasNull = false;
+        if (value instanceof byte[]) {
+            return (byte[]) value;
+        }
+        return value.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    @Override
+    public byte[] getBytes(String columnLabel) throws SQLException {
+        return getBytes(findColumn(columnLabel));
+    }
+
+    @Override
     public short getShort(String columnLabel) throws SQLException {
         return getShort(findColumn(columnLabel));
     }
@@ -884,6 +906,11 @@ public class DeskDBResultSet implements ResultSet {
     }
 
     @Override
+    public void updateNCharacterStream(int columnIndex, java.io.Reader x, long length) throws SQLException {
+        throw new SQLFeatureNotSupportedException("ResultSet is read-only");
+    }
+
+    @Override
     public void updateAsciiStream(int columnIndex, java.io.InputStream x) throws SQLException {
         throw new SQLFeatureNotSupportedException("ResultSet is read-only");
     }
@@ -1046,5 +1073,475 @@ public class DeskDBResultSet implements ResultSet {
     @Override
     public void updateNClob(String columnLabel, java.io.Reader reader, long length) throws SQLException {
         throw new SQLFeatureNotSupportedException("ResultSet is read-only");
+    }
+
+    @Override
+    public java.io.Reader getNCharacterStream(int columnIndex) throws SQLException {
+        throw new SQLFeatureNotSupportedException("Not supported");
+    }
+
+    @Override
+    public java.io.Reader getNCharacterStream(String columnLabel) throws SQLException {
+        throw new SQLFeatureNotSupportedException("Not supported");
+    }
+
+    @Override
+    public String getNString(int columnIndex) throws SQLException {
+        checkClosed();
+        validateColumnIndex(columnIndex);
+        Row row = getCurrentRow();
+        if (row == null || currentRow < 0 || currentRow >= rows.size()) {
+            wasNull = true;
+            return null;
+        }
+        Object value = row.get(columnNames[columnIndex - 1]);
+        if (value == null) {
+            wasNull = true;
+            return null;
+        }
+        wasNull = false;
+        return value.toString();
+    }
+
+    @Override
+    public String getNString(String columnLabel) throws SQLException {
+        checkClosed();
+        int columnIndex = findColumn(columnLabel);
+        return getNString(columnIndex);
+    }
+
+    @Override
+    public java.sql.SQLXML getSQLXML(int columnIndex) throws SQLException {
+        throw new SQLFeatureNotSupportedException("Not supported");
+    }
+
+    @Override
+    public java.sql.SQLXML getSQLXML(String columnLabel) throws SQLException {
+        throw new SQLFeatureNotSupportedException("Not supported");
+    }
+
+    @Override
+    public java.sql.NClob getNClob(int columnIndex) throws SQLException {
+        throw new SQLFeatureNotSupportedException("Not supported");
+    }
+
+    @Override
+    public java.sql.NClob getNClob(String columnLabel) throws SQLException {
+        throw new SQLFeatureNotSupportedException("Not supported");
+    }
+
+    @Override
+    public int getHoldability() throws SQLException {
+        checkClosed();
+        return ResultSet.HOLD_CURSORS_OVER_COMMIT;
+    }
+
+    @Override
+    public java.sql.RowId getRowId(int columnIndex) throws SQLException {
+        throw new SQLFeatureNotSupportedException("Not supported");
+    }
+
+    @Override
+    public java.sql.RowId getRowId(String columnLabel) throws SQLException {
+        throw new SQLFeatureNotSupportedException("Not supported");
+    }
+
+    @Override
+    public java.net.URL getURL(int columnIndex) throws SQLException {
+        throw new SQLFeatureNotSupportedException("Not supported");
+    }
+
+    @Override
+    public java.net.URL getURL(String columnLabel) throws SQLException {
+        throw new SQLFeatureNotSupportedException("Not supported");
+    }
+
+    @Override
+    public java.sql.Timestamp getTimestamp(int columnIndex) throws SQLException {
+        checkClosed();
+        validateColumnIndex(columnIndex);
+        String columnName = columnNames[columnIndex - 1];
+        Object value = getCurrentRow().get(columnName);
+        if (value == null) {
+            wasNull = true;
+            return null;
+        }
+        wasNull = false;
+        if (value instanceof java.sql.Timestamp) {
+            return (java.sql.Timestamp) value;
+        }
+        return java.sql.Timestamp.valueOf(value.toString());
+    }
+
+    @Override
+    public java.sql.Timestamp getTimestamp(int columnIndex, java.util.Calendar cal) throws SQLException {
+        checkClosed();
+        validateColumnIndex(columnIndex);
+        String columnName = columnNames[columnIndex - 1];
+        Object value = getCurrentRow().get(columnName);
+        if (value == null) {
+            wasNull = true;
+            return null;
+        }
+        wasNull = false;
+        if (value instanceof java.sql.Timestamp) {
+            return (java.sql.Timestamp) value;
+        }
+        return java.sql.Timestamp.valueOf(value.toString());
+    }
+
+    @Override
+    public java.sql.Timestamp getTimestamp(String columnLabel) throws SQLException {
+        return getTimestamp(findColumn(columnLabel));
+    }
+
+    @Override
+    public java.sql.Timestamp getTimestamp(String columnLabel, java.util.Calendar cal) throws SQLException {
+        return getTimestamp(findColumn(columnLabel), cal);
+    }
+
+    @Override
+    public java.sql.Time getTime(int columnIndex) throws SQLException {
+        checkClosed();
+        validateColumnIndex(columnIndex);
+        String columnName = columnNames[columnIndex - 1];
+        Object value = getCurrentRow().get(columnName);
+        if (value == null) {
+            wasNull = true;
+            return null;
+        }
+        wasNull = false;
+        if (value instanceof java.sql.Time) {
+            return (java.sql.Time) value;
+        }
+        return java.sql.Time.valueOf(value.toString());
+    }
+
+    @Override
+    public java.sql.Time getTime(int columnIndex, java.util.Calendar cal) throws SQLException {
+        checkClosed();
+        validateColumnIndex(columnIndex);
+        String columnName = columnNames[columnIndex - 1];
+        Object value = getCurrentRow().get(columnName);
+        if (value == null) {
+            wasNull = true;
+            return null;
+        }
+        wasNull = false;
+        if (value instanceof java.sql.Time) {
+            return (java.sql.Time) value;
+        }
+        return java.sql.Time.valueOf(value.toString());
+    }
+
+    @Override
+    public java.sql.Time getTime(String columnLabel) throws SQLException {
+        return getTime(findColumn(columnLabel));
+    }
+
+    @Override
+    public java.sql.Time getTime(String columnLabel, java.util.Calendar cal) throws SQLException {
+        return getTime(findColumn(columnLabel), cal);
+    }
+
+    @Override
+    public java.sql.Date getDate(int columnIndex) throws SQLException {
+        checkClosed();
+        validateColumnIndex(columnIndex);
+        String columnName = columnNames[columnIndex - 1];
+        Object value = getCurrentRow().get(columnName);
+        if (value == null) {
+            wasNull = true;
+            return null;
+        }
+        wasNull = false;
+        if (value instanceof java.sql.Date) {
+            return (java.sql.Date) value;
+        }
+        return java.sql.Date.valueOf(value.toString());
+    }
+
+    @Override
+    public java.sql.Date getDate(int columnIndex, java.util.Calendar cal) throws SQLException {
+        checkClosed();
+        validateColumnIndex(columnIndex);
+        String columnName = columnNames[columnIndex - 1];
+        Object value = getCurrentRow().get(columnName);
+        if (value == null) {
+            wasNull = true;
+            return null;
+        }
+        wasNull = false;
+        if (value instanceof java.sql.Date) {
+            return (java.sql.Date) value;
+        }
+        return java.sql.Date.valueOf(value.toString());
+    }
+
+    @Override
+    public java.sql.Date getDate(String columnLabel) throws SQLException {
+        return getDate(findColumn(columnLabel));
+    }
+
+    @Override
+    public java.sql.Date getDate(String columnLabel, java.util.Calendar cal) throws SQLException {
+        return getDate(findColumn(columnLabel), cal);
+    }
+
+    @Override
+    public java.sql.Array getArray(int columnIndex) throws SQLException {
+        throw new SQLFeatureNotSupportedException("Not supported");
+    }
+
+    @Override
+    public java.sql.Array getArray(String columnLabel) throws SQLException {
+        throw new SQLFeatureNotSupportedException("Not supported");
+    }
+
+    @Override
+    public java.sql.Clob getClob(int columnIndex) throws SQLException {
+        throw new SQLFeatureNotSupportedException("Not supported");
+    }
+
+    @Override
+    public java.sql.Clob getClob(String columnLabel) throws SQLException {
+        throw new SQLFeatureNotSupportedException("Not supported");
+    }
+
+    @Override
+    public java.sql.Blob getBlob(int columnIndex) throws SQLException {
+        throw new SQLFeatureNotSupportedException("Not supported");
+    }
+
+    @Override
+    public java.sql.Blob getBlob(String columnLabel) throws SQLException {
+        throw new SQLFeatureNotSupportedException("Not supported");
+    }
+
+    @Override
+    public java.sql.Ref getRef(int columnIndex) throws SQLException {
+        throw new SQLFeatureNotSupportedException("Not supported");
+    }
+
+    @Override
+    public java.sql.Ref getRef(String columnLabel) throws SQLException {
+        throw new SQLFeatureNotSupportedException("Not supported");
+    }
+
+    @Override
+    public Object getObject(String columnLabel, Map<String, Class<?>> map) throws SQLException {
+        return getObject(findColumn(columnLabel));
+    }
+
+    @Override
+    public Object getObject(int columnIndex, Map<String, Class<?>> map) throws SQLException {
+        return getObject(columnIndex);
+    }
+
+    // Métodos de información de filas (siempre false para ResultSet read-only)
+    @Override
+    public boolean rowDeleted() throws SQLException {
+        checkClosed();
+        return false;
+    }
+
+    @Override
+    public boolean rowUpdated() throws SQLException {
+        checkClosed();
+        return false;
+    }
+
+    @Override
+    public boolean rowInserted() throws SQLException {
+        checkClosed();
+        return false;
+    }
+
+    @Override
+    public java.math.BigDecimal getBigDecimal(String columnLabel) throws SQLException {
+        checkClosed();
+        int columnIndex = findColumn(columnLabel);
+        return getBigDecimal(columnIndex);
+    }
+
+    @Override
+    public java.math.BigDecimal getBigDecimal(int columnIndex) throws SQLException {
+        checkClosed();
+        validateColumnIndex(columnIndex);
+        
+        Row row = getCurrentRow();
+        if (row == null) {
+            wasNull = true;
+            return null;
+        }
+        
+        String columnName = columnNames[columnIndex - 1];
+        Object value = row.get(columnName);
+        
+        if (value == null) {
+            wasNull = true;
+            return null;
+        }
+        
+        wasNull = false;
+        if (value instanceof java.math.BigDecimal) {
+            return (java.math.BigDecimal) value;
+        }
+        if (value instanceof Number) {
+            return new java.math.BigDecimal(value.toString());
+        }
+        try {
+            return new java.math.BigDecimal(value.toString());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    @Override
+    public java.math.BigDecimal getBigDecimal(String columnLabel, int scale) throws SQLException {
+        java.math.BigDecimal result = getBigDecimal(columnLabel);
+        if (result == null) {
+            return null;
+        }
+        return result.setScale(scale, java.math.RoundingMode.HALF_UP);
+    }
+
+    @Override
+    public java.math.BigDecimal getBigDecimal(int columnIndex, int scale) throws SQLException {
+        java.math.BigDecimal result = getBigDecimal(columnIndex);
+        if (result == null) {
+            return null;
+        }
+        return result.setScale(scale, java.math.RoundingMode.HALF_UP);
+    }
+
+    @Override
+    public java.io.Reader getCharacterStream(String columnLabel) throws SQLException {
+        checkClosed();
+        int columnIndex = findColumn(columnLabel);
+        return getCharacterStream(columnIndex);
+    }
+
+    @Override
+    public java.io.Reader getCharacterStream(int columnIndex) throws SQLException {
+        checkClosed();
+        validateColumnIndex(columnIndex);
+        
+        Row row = getCurrentRow();
+        if (row == null) {
+            wasNull = true;
+            return null;
+        }
+        
+        String columnName = columnNames[columnIndex - 1];
+        Object value = row.get(columnName);
+        
+        if (value == null) {
+            wasNull = true;
+            return null;
+        }
+        
+        wasNull = false;
+        return new java.io.StringReader(value.toString());
+    }
+
+    @Override
+    public ResultSetMetaData getMetaData() throws SQLException {
+        checkClosed();
+        return new DeskDBResultSetMetaData(columnNames);
+    }
+
+    @Override
+    public String getCursorName() throws SQLException {
+        checkClosed();
+        return null; // No soportamos cursores con nombre
+    }
+
+    @Override
+    public SQLWarning getWarnings() throws SQLException {
+        checkClosed();
+        return null; // Sin warnings
+    }
+
+    @Override
+    public void clearWarnings() throws SQLException {
+        checkClosed();
+        // No hay warnings que limpiar
+    }
+
+    @Override
+    public java.io.InputStream getAsciiStream(String columnLabel) throws SQLException {
+        checkClosed();
+        int columnIndex = findColumn(columnLabel);
+        return getAsciiStream(columnIndex);
+    }
+
+    @Override
+    public java.io.InputStream getAsciiStream(int columnIndex) throws SQLException {
+        checkClosed();
+        validateColumnIndex(columnIndex);
+        
+        Row row = getCurrentRow();
+        if (row == null) {
+            wasNull = true;
+            return null;
+        }
+        
+        String columnName = columnNames[columnIndex - 1];
+        Object value = row.get(columnName);
+        
+        if (value == null) {
+            wasNull = true;
+            return null;
+        }
+        
+        wasNull = false;
+        return new java.io.ByteArrayInputStream(value.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    @Override
+    public java.io.InputStream getBinaryStream(String columnLabel) throws SQLException {
+        checkClosed();
+        int columnIndex = findColumn(columnLabel);
+        return getBinaryStream(columnIndex);
+    }
+
+    @Override
+    public java.io.InputStream getBinaryStream(int columnIndex) throws SQLException {
+        checkClosed();
+        validateColumnIndex(columnIndex);
+        
+        Row row = getCurrentRow();
+        if (row == null) {
+            wasNull = true;
+            return null;
+        }
+        
+        String columnName = columnNames[columnIndex - 1];
+        Object value = row.get(columnName);
+        
+        if (value == null) {
+            wasNull = true;
+            return null;
+        }
+        
+        wasNull = false;
+        if (value instanceof byte[]) {
+            return new java.io.ByteArrayInputStream((byte[]) value);
+        }
+        return new java.io.ByteArrayInputStream(value.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    @Override
+    public java.io.InputStream getUnicodeStream(String columnLabel) throws SQLException {
+        checkClosed();
+        int columnIndex = findColumn(columnLabel);
+        return getUnicodeStream(columnIndex);
+    }
+
+    @Override
+    public java.io.InputStream getUnicodeStream(int columnIndex) throws SQLException {
+        // Método obsoleto en JDBC, usamos getCharacterStream en su lugar
+        return getAsciiStream(columnIndex);
     }
 }

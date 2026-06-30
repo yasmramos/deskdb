@@ -8,37 +8,40 @@ build/
 target/
 
 # Dependencies
-venv/
-.venv/
-__pycache__/
-.mypy_cache/
-.pytest_cache/
 .gradle/
+lib/
+deps/
 
 # Logs and temp files
 *.log
 *.tmp
 *.swp
 
+# Editors
+.vscode/
+.idea/
+
 # Environment
 .env
 .env.local
 *.env.*
 
-# Editors
-.vscode/
-.idea/
+# Python (if applicable)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+pip-log.txt
+pip-selfcheck.json
 
-# System files
-.DS_Store
-Thumbs.db
-
-# Coverage
+# Coverage reports
 coverage/
 htmlcov/
 .coverage
 
-# Compressed files
+# Compression files
 *.zip
 *.gz
 *.tar
