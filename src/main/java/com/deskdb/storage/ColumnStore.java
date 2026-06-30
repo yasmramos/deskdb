@@ -78,6 +78,11 @@ public class ColumnStore {
     public Object getValue(long rowId, String columnName) {
         lock.readLock().lock();
         try {
+            // Verificar si la fila está eliminada
+            if (deletedRows.containsKey(rowId)) {
+                return null;
+            }
+            
             Map<String, Integer> positions = rowPositions.get(rowId);
             if (positions == null) {
                 return null;
@@ -119,6 +124,12 @@ public class ColumnStore {
             }
             
             for (Long rowId : rowIds) {
+                // Verificar si la fila está eliminada
+                if (deletedRows.containsKey(rowId)) {
+                    results.add(null);
+                    continue;
+                }
+                
                 Map<String, Integer> positions = rowPositions.get(rowId);
                 if (positions == null) {
                     results.add(null);
@@ -180,14 +191,17 @@ public class ColumnStore {
         }
     }
     
+    private final Map<Long, Boolean> deletedRows = new HashMap<>();
+    
     /**
      * Elimina una fila (marca como eliminada, no compacta inmediatamente).
      */
     public void delete(long rowId) {
         lock.writeLock().lock();
         try {
-            rowPositions.remove(rowId);
-            rowCount--;
+            deletedRows.put(rowId, true);
+            // No decrementamos rowCount para evitar reutilización de IDs
+            // rowCount representa el total histórico de filas insertadas
             // Nota: En una implementación completa, marcaríamos las celdas como eliminadas
             // y haríamos compactación periódica.
         } finally {
@@ -241,7 +255,8 @@ public class ColumnStore {
     public int getRowCount() {
         lock.readLock().lock();
         try {
-            return rowCount;
+            // Retornar el contador de filas menos las eliminadas
+            return rowCount - deletedRows.size();
         } finally {
             lock.readLock().unlock();
         }

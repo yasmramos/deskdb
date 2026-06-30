@@ -3,15 +3,26 @@ package com.deskdb.query;
 import com.deskdb.core.Table;
 import com.deskdb.core.Filter;
 import com.deskdb.core.Row;
+import com.deskdb.core.Transaction;
 import java.util.Collections;
 import java.util.List;
 
 public class DeleteBuilder {
     private final Table table;
+    private final Transaction transaction;
+    private final String tableName;
     private Filter filter;
 
     public DeleteBuilder(Table table) {
         this.table = table;
+        this.transaction = null;
+        this.tableName = null;
+    }
+    
+    public DeleteBuilder(Transaction transaction, String tableName) {
+        this.table = null;
+        this.transaction = transaction;
+        this.tableName = tableName;
     }
 
     public WhereCondition where(String column) {
@@ -22,9 +33,19 @@ public class DeleteBuilder {
         if (filter == null) {
             throw new IllegalStateException("WHERE clause required for delete");
         }
-        List<Row> rows = table.select(Collections.singletonList(filter));
+        List<Row> rows;
+        if (transaction != null) {
+            rows = transaction.select(tableName, Collections.singletonList(filter));
+        } else {
+            rows = table.select(Collections.singletonList(filter));
+        }
+        
         for (Row row : rows) {
-            table.delete(row.getRowId());
+            if (transaction != null) {
+                transaction.applyChange(tableName, row.getRowId(), null);
+            } else {
+                table.delete(row.getRowId());
+            }
         }
         return rows.size();
     }

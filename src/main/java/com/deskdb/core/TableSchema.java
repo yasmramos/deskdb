@@ -83,4 +83,9 @@ public class TableSchema {
     public java.util.List<Column> getColumnsList() {
         return new java.util.ArrayList<>(columns.values());
     }
+    
+    // Método auxiliar para obtener nombres de columnas
+    public java.util.List<String> getColumnNames() {
+        return new java.util.ArrayList<>(columns.keySet());
+    }
 }

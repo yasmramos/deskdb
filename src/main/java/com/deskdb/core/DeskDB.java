@@ -1,5 +1,6 @@
 package com.deskdb.core;
 
+import com.deskdb.index.BTree;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -19,30 +20,30 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Punto de entrada principal para DeskDB.
  * Gestiona la apertura/cierre de la base de datos y proporciona acceso a las tablas.
+ * TODO EL CONTENIDO SE GUARDA EN UN SOLO ARCHIVO .deskdb (como H2)
  */
 public class DeskDB implements AutoCloseable {
     private static final Logger logger = LoggerFactory.getLogger(DeskDB.class);
 
     private final Path dbPath;
-    private final Path walPath;
     private final Map<String, Table> tables;
     private final Map<String, TableSchema> schemas;
+    private final Map<String, Map<String, BTree<?, ?>>> indexes; // tableName -> indexName -> BTree
     private boolean closed = false;
 
     private DeskDB(Path dbPath) throws IOException {
         this.dbPath = dbPath;
-        this.walPath = dbPath.getParent().resolve(dbPath.getFileName().toString() + ".wal");
         this.tables = new ConcurrentHashMap<>();
         this.schemas = new HashMap<>();
-        
-        // Recuperar desde WAL si existe
-        if (Files.exists(walPath)) {
-            Transaction.recover(this, walPath);
-        }
+        this.indexes = new ConcurrentHashMap<>();
         
         if (Files.exists(dbPath)) {
             loadFromFile();
         } else {
+            // Crear directorio padre si no existe
+            if (dbPath.getParent() != null) {
+                Files.createDirectories(dbPath.getParent());
+            }
             saveToFile();
         }
         
@@ -93,6 +94,14 @@ public class DeskDB implements AutoCloseable {
     }
 
     /**
+     * Obtiene una tabla por nombre para realizar operaciones dentro de una transacción.
+     */
+    TableOperations table(String tableName, Transaction transaction) {
+        checkClosed();
+        return new TableOperations(this, tableName, transaction);
+    }
+
+    /**
      * Crea una tabla con el esquema especificado.
      *
      * @param tableName Nombre de la tabla
@@ -111,6 +120,14 @@ public class DeskDB implements AutoCloseable {
         
         Table table = new Table(tableName, List.of(columns), dbPath.toString());
         tables.put(tableName, table);
+        indexes.put(tableName, new ConcurrentHashMap<>());
+        
+        // Crear índice automático para primary key
+        for (Column col : columns) {
+            if (col.isPrimaryKey()) {
+                createIndex(tableName, col.getName() + "_idx", col.getName());
+            }
+        }
         
         logger.info("Tabla '{}' creada con {} columnas", tableName, columns.length);
         return table;
@@ -140,10 +157,6 @@ public class DeskDB implements AutoCloseable {
     public void close() throws IOException {
         if (!closed) {
             saveToFile();
-            // Eliminar WAL si existe
-            if (Files.exists(walPath)) {
-                Files.delete(walPath);
-            }
             closed = true;
             logger.info("DeskDB closed at {}", dbPath.toAbsolutePath());
         }
@@ -153,18 +166,10 @@ public class DeskDB implements AutoCloseable {
      * Inicia una nueva transacción ACID.
      * 
      * @return Transacción para realizar operaciones atómicas
-     * @throws IOException si hay un error al crear el WAL
      */
     public Transaction beginTransaction() throws IOException {
         checkClosed();
         return new Transaction(this);
-    }
-
-    /**
-     * Obtiene el path del WAL.
-     */
-    Path getWalPath() {
-        return walPath;
     }
 
     /**
@@ -195,6 +200,39 @@ public class DeskDB implements AutoCloseable {
         schemas.put(tableName, schema);
     }
 
+    /**
+     * Crea un índice BTree en una columna específica.
+     */
+    @SuppressWarnings("unchecked")
+    public <K extends Comparable<K>> void createIndex(String tableName, String indexName, String columnName) throws IOException {
+        checkClosed();
+        Map<String, BTree<?, ?>> tableIndexes = indexes.computeIfAbsent(tableName, k -> new ConcurrentHashMap<>());
+        BTree<K, Long> btree = new BTree<>(indexName);
+        tableIndexes.put(indexName, btree);
+        
+        // Indexar datos existentes
+        Table table = tables.get(tableName);
+        if (table != null) {
+            for (Row row : table.select(null)) {
+                Object value = row.get(columnName);
+                if (value != null) {
+                    btree.insert((K) value, row.getRowId());
+                }
+            }
+        }
+        logger.info("Índice '{}' creado en tabla '{}' para columna '{}'", indexName, tableName, columnName);
+    }
+
+    /**
+     * Obtiene un índice por nombre de tabla y índice.
+     */
+    @SuppressWarnings("unchecked")
+    public <K extends Comparable<K>> BTree<K, Long> getIndex(String tableName, String indexName) {
+        Map<String, BTree<?, ?>> tableIndexes = indexes.get(tableName);
+        if (tableIndexes == null) return null;
+        return (BTree<K, Long>) tableIndexes.get(indexName);
+    }
+
     private void checkClosed() {
         if (closed) {
             throw new IllegalStateException("DeskDB está cerrada");
@@ -203,7 +241,6 @@ public class DeskDB implements AutoCloseable {
 
     @SuppressWarnings("unchecked")
     private void loadFromFile() throws IOException {
-        // Cargar esquemas primero
         try {
             byte[] content = Files.readAllBytes(dbPath);
             if (content.length > 0) {
@@ -228,28 +265,113 @@ public class DeskDB implements AutoCloseable {
                     TableSchema schema = new TableSchema(tableName, List.of(columns));
                     schemas.put(tableName, schema);
                     
-                    // Crear tabla y cargar datos
+                    // Crear tabla
                     Table table = new Table(tableName, List.of(columns), dbPath.toString());
                     tables.put(tableName, table);
+                }
+                
+                // Leer datos si existen
+                if (in.available() >= 4) {
+                    int dataLength = in.readInt();
+                    if (dataLength > 0 && in.available() >= dataLength) {
+                        byte[] dataContent = new byte[dataLength];
+                        in.readFully(dataContent);
+                        
+                        ByteArrayInputStream dataBais = new ByteArrayInputStream(dataContent);
+                        DataInputStream dataIn = new DataInputStream(dataBais);
+                        
+                        // Leer datos de cada tabla
+                        while (dataIn.available() > 0) {
+                            String tableName = dataIn.readUTF();
+                            int rowCount = dataIn.readInt();
+                            
+                            Table table = tables.get(tableName);
+                            if (table != null) {
+                                for (int i = 0; i < rowCount; i++) {
+                                    long rowId = dataIn.readLong();
+                                    int valueCount = dataIn.readInt();
+                                    Map<String, Object> values = new HashMap<>();
+                                    
+                                    for (int j = 0; j < valueCount; j++) {
+                                        String key = dataIn.readUTF();
+                                        Object value = readValue(dataIn);
+                                        values.put(key, value);
+                                    }
+                                    
+                                    Row row = new Row(rowId, values);
+                                    table.getData().put(rowId, row);
+                                }
+                            }
+                        }
+                        
+                        dataIn.close();
+                        logger.info("Datos cargados desde archivo");
+                    }
                 }
                 
                 in.close();
                 logger.info("Esquemas y datos cargados desde {}", dbPath);
             }
         } catch (Exception e) {
-            logger.warn("Error al cargar datos existentes, comenzando con DB vacía: {}", e.getMessage());
+            logger.warn("Error al cargar datos existentes, comenzando con DB vacía: {}", e.getMessage(), e);
+        }
+    }
+    
+    private Object readValue(DataInputStream in) throws IOException {
+        boolean hasValue = in.readBoolean();
+        if (!hasValue) {
+            return null;
+        }
+        
+        // Leer tipo y valor
+        byte typeFlag = in.readByte();
+        switch (typeFlag) {
+            case 0: return in.readUTF();      // String
+            case 1: return in.readInt();       // Integer
+            case 2: return in.readLong();      // Long
+            case 3: return in.readDouble();    // Double
+            case 4: return in.readBoolean();   // Boolean
+            default: return in.readUTF();      // Fallback a String
         }
     }
 
     private void saveToFile() throws IOException {
         synchronized (this) {
+            // Primero guardar datos de todas las tablas en el archivo principal
+            ByteArrayOutputStream dataBaos = new ByteArrayOutputStream();
+            DataOutputStream dataOut = new DataOutputStream(dataBaos);
+            
+            // Guardar datos de cada tabla
+            for (Map.Entry<String, Table> entry : tables.entrySet()) {
+                Table table = entry.getValue();
+                List<Row> rows = table.select(null);
+                
+                // Escribir nombre de tabla
+                dataOut.writeUTF(entry.getKey());
+                dataOut.writeInt(rows.size());
+                
+                // Escribir cada fila
+                for (Row row : rows) {
+                    dataOut.writeLong(row.getRowId());
+                    Map<String, Object> values = row.getValues();
+                    dataOut.writeInt(values.size());
+                    for (Map.Entry<String, Object> valEntry : values.entrySet()) {
+                        dataOut.writeUTF(valEntry.getKey());
+                        writeValue(dataOut, valEntry.getValue());
+                    }
+                }
+            }
+            dataOut.close();
+            byte[] dataContent = dataBaos.toByteArray();
+            
+            // Ahora guardar esquemas + datos concatenados
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             DataOutputStream out = new DataOutputStream(baos);
             
             // Guardar número de esquemas
             out.writeInt(schemas.size());
             
-            // Guardar cada esquema y sus datos
+            // Guardar cada esquema
             for (Map.Entry<String, TableSchema> entry : schemas.entrySet()) {
                 TableSchema schema = entry.getValue();
                 out.writeUTF(entry.getKey());
@@ -265,10 +387,44 @@ public class DeskDB implements AutoCloseable {
                 }
             }
             
+            // Guardar longitud y contenido de los datos
+            out.writeInt(dataContent.length);
+            out.write(dataContent);
+            
             out.close();
             byte[] content = baos.toByteArray();
             Files.write(dbPath, content);
-            logger.debug("Esquemas guardados en {}", dbPath);
+            logger.debug("Base de datos guardada en {}", dbPath);
+        }
+    }
+    
+    private void writeValue(DataOutputStream out, Object value) throws IOException {
+        if (value == null) {
+            out.writeBoolean(false);
+            return;
+        }
+        
+        out.writeBoolean(true);
+        
+        // Escribir tipo y valor
+        if (value instanceof String) {
+            out.writeByte(0);
+            out.writeUTF((String) value);
+        } else if (value instanceof Integer) {
+            out.writeByte(1);
+            out.writeInt((Integer) value);
+        } else if (value instanceof Long) {
+            out.writeByte(2);
+            out.writeLong((Long) value);
+        } else if (value instanceof Double) {
+            out.writeByte(3);
+            out.writeDouble((Double) value);
+        } else if (value instanceof Boolean) {
+            out.writeByte(4);
+            out.writeBoolean((Boolean) value);
+        } else {
+            out.writeByte(0);
+            out.writeUTF(value.toString());
         }
     }
 }
