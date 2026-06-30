@@ -85,7 +85,13 @@ public class EntityManager {
         try {
             // Auto-generate ID if null
             if (idValue == null) {
-                idValue = generateNextId(tableName, idColumnName);
+                Long generatedId = generateNextId(tableName, idColumnName);
+                // Convert to Integer if the field type is Integer
+                if (idField.getType() == Integer.class || idField.getType() == int.class) {
+                    idValue = generatedId.intValue();
+                } else {
+                    idValue = generatedId;
+                }
                 values.put(idColumnName, idValue);
                 // Set the generated ID back to the entity
                 idField.setAccessible(true);
