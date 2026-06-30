@@ -8,4 +8,13 @@ import java.lang.annotation.Target;
 @Target({ElementType.FIELD, ElementType.METHOD})
 @Retention(RetentionPolicy.RUNTIME)
 public @interface ManyToOne {
+    /**
+     * The join column for this relationship.
+     */
+    JoinColumn[] joinColumn() default {};
+    
+    /**
+     * The target entity class.
+     */
+    Class<?> targetEntity() default void.class;
 }
