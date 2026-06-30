@@ -5,6 +5,7 @@ import com.deskdb.core.Row;
 import com.deskdb.mapping.annotations.*;
 
 import java.lang.reflect.Field;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -22,14 +23,18 @@ public class EntityManager {
     }
 
     /**
-     * Persists an entity to the database.
+     * Persists an entity to the database. If the entity already exists (based on ID), it updates it.
      */
     public <T> void persist(T entity) {
         Class<?> clazz = entity.getClass();
         validateEntity(clazz);
 
         String tableName = getTableName(clazz);
+        Field idField = getIdField(clazz);
+        String idColumnName = getColumnName(idField);
+        
         Map<String, Object> values = new HashMap<>();
+        Object idValue = null;
 
         for (Field field : clazz.getDeclaredFields()) {
             if (field.isAnnotationPresent(Transient.class)) {
@@ -42,6 +47,10 @@ public class EntityManager {
                     String columnName = getColumnName(field);
                     Object value = field.get(entity);
                     values.put(columnName, value);
+                    
+                    if (field.isAnnotationPresent(Id.class)) {
+                        idValue = value;
+                    }
                 } catch (IllegalAccessException e) {
                     throw new RuntimeException("Failed to access field: " + field.getName(), e);
                 }
@@ -49,7 +58,25 @@ public class EntityManager {
         }
 
         try {
-            db.table(tableName).insert().insert(values).execute();
+            // Check if entity already exists
+            List<Row> existing = db.table(tableName)
+                    .select()
+                    .where(idColumnName)
+                    .eq(idValue)
+                    .execute();
+            
+            if (!existing.isEmpty()) {
+                // Update existing entity
+                db.table(tableName)
+                    .update()
+                    .set(values)
+                    .where(idColumnName)
+                    .eq(idValue)
+                    .execute();
+            } else {
+                // Insert new entity
+                db.table(tableName).insert().insert(values).execute();
+            }
         } catch (Exception e) {
             throw new RuntimeException("Failed to persist entity", e);
         }
@@ -130,6 +157,19 @@ public class EntityManager {
         } catch (Exception e) {
             throw new RuntimeException("Failed to remove entity", e);
         }
+    }
+
+    /**
+     * Executes a native SQL query and maps results to entities.
+     * Note: This is a simplified implementation that currently ignores the SQL and parameters,
+     * returning all entities of the given type. Full SQL parsing support is planned for future versions.
+     */
+    public <T> List<T> createQuery(String sql, Class<T> entityType, Object... params) {
+        validateEntity(entityType);
+        
+        // For now, just return all records - full SQL parsing would be complex
+        // TODO: Implement proper SQL parsing and parameter binding in future versions
+        return findAll(entityType);
     }
 
     @SuppressWarnings("unchecked")
