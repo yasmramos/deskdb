@@ -1,15 +1,10 @@
 ```
-# Compiled and build artifacts
+# Java/Maven build artifacts
+target/
+# Compiled class files
 *.class
-*.o
-*.obj
-*.out
-# Dependencies
-.gradle/
-# Logs and temp files
-*.log
-*.tmp
-# Editors
-.vscode/
-.idea/
+# Maven status files
+META-INF/services/java.sql.Driver
+# Test reports
+**/surefire-reports/
 ```

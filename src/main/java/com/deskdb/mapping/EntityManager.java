@@ -48,8 +48,9 @@ public class EntityManager {
                 field.setAccessible(true);
                 try {
                     ManyToOne manyToOne = field.getAnnotation(ManyToOne.class);
-                    String joinColumn = manyToOne.joinColumn().isEmpty() ? 
-                        field.getName() + "_id" : manyToOne.joinColumn();
+                    JoinColumn[] joinColumns = manyToOne.joinColumn();
+                    String joinColumnName = (joinColumns == null || joinColumns.length == 0) ? 
+                        field.getName() + "_id" : joinColumns[0].name();
                     
                     Object relatedEntity = field.get(entity);
                     if (relatedEntity != null) {
@@ -57,7 +58,7 @@ public class EntityManager {
                         Field relatedIdField = getIdField(relatedEntity.getClass());
                         relatedIdField.setAccessible(true);
                         Object relatedIdValue = relatedIdField.get(relatedEntity);
-                        values.put(joinColumn, relatedIdValue);
+                        values.put(joinColumnName, relatedIdValue);
                     }
                 } catch (IllegalAccessException e) {
                     throw new RuntimeException("Failed to access ManyToOne field: " + field.getName(), e);
@@ -245,10 +246,11 @@ public class EntityManager {
                 if (field.isAnnotationPresent(ManyToOne.class)) {
                     field.setAccessible(true);
                     ManyToOne manyToOne = field.getAnnotation(ManyToOne.class);
-                    String joinColumn = manyToOne.joinColumn().isEmpty() ? 
-                        field.getName() + "_id" : manyToOne.joinColumn();
+                    JoinColumn[] joinColumns = manyToOne.joinColumn();
+                    String joinColumnName = (joinColumns == null || joinColumns.length == 0) ? 
+                        field.getName() + "_id" : joinColumns[0].name();
                     
-                    Object foreignKeyId = row.get(joinColumn);
+                    Object foreignKeyId = row.get(joinColumnName);
                     if (foreignKeyId != null) {
                         Class<?> targetEntity = manyToOne.targetEntity();
                         EntityManager targetEm = new EntityManager(db);
