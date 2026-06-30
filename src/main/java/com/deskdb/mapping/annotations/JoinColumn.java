@@ -6,18 +6,23 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Specifies a join column for a relationship.
+ * Specifies a join column for relationships.
  */
-@Target({ElementType.FIELD, ElementType.METHOD})
+@Target(ElementType.FIELD)
 @Retention(RetentionPolicy.RUNTIME)
 public @interface JoinColumn {
     /**
      * The name of the join column.
      */
     String name() default "";
-
+    
     /**
-     * The name of the referenced column in the target entity.
+     * The name of the referenced column.
      */
-    String referencedColumnName() default "";
+    String referencedColumnName() default "id";
+    
+    /**
+     * Whether the column is nullable.
+     */
+    boolean nullable() default true;
 }
