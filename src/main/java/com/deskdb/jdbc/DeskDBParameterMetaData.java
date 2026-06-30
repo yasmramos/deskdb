@@ -5,7 +5,7 @@ import java.sql.SQLException;
 import java.sql.Types;
 
 /**
- * Implementación simple de ParameterMetaData para DeskDB.
+ * Simple ParameterMetaData implementation for DeskDB.
  */
 public class DeskDBParameterMetaData implements ParameterMetaData {
     

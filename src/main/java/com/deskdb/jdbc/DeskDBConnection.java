@@ -8,7 +8,7 @@ import java.util.Properties;
 import java.util.concurrent.Executor;
 
 /**
- * Implementación de Connection JDBC para DeskDB.
+ * JDBC Connection implementation for DeskDB.
  */
 public class DeskDBConnection implements Connection {
 

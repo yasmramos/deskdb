@@ -4,9 +4,9 @@ import java.io.*;
 import java.util.*;
 
 /**
- * Implementación de B-Tree para índices en DeskDB.
+ * B-Tree implementation for indexes in DeskDB.
  * 
- * @param <K> Tipo de clave (debe ser Comparable)
+ * @param <K> Key type (must be Comparable)
  */
 public class BTree<K extends Comparable<K>, V> {
     
