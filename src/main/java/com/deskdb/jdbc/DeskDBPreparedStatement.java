@@ -5,7 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Implementación de PreparedStatement JDBC para DeskDB.
+ * JDBC PreparedStatement implementation for DeskDB.
  */
 public class DeskDBPreparedStatement extends DeskDBStatement implements PreparedStatement {
 

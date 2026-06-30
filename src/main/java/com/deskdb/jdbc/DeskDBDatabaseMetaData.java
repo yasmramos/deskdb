@@ -4,7 +4,7 @@ import java.sql.*;
 import java.util.ArrayList;
 
 /**
- * Implementación de DatabaseMetaData JDBC para DeskDB.
+ * JDBC DatabaseMetaData implementation for DeskDB.
  */
 public class DeskDBDatabaseMetaData implements DatabaseMetaData {
 

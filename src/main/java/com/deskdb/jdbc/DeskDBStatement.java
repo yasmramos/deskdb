@@ -4,7 +4,7 @@ import java.sql.*;
 import java.util.Map;
 
 /**
- * Implementación de Statement JDBC para DeskDB.
+ * JDBC Statement implementation for DeskDB.
  */
 public class DeskDBStatement implements Statement {
 

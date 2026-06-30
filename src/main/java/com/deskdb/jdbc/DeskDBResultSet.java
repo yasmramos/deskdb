@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Implementación de ResultSet JDBC para DeskDB.
+ * JDBC ResultSet implementation for DeskDB.
  */
 public class DeskDBResultSet implements ResultSet {
 

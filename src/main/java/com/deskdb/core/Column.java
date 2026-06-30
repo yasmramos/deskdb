@@ -1,7 +1,7 @@
 package com.deskdb.core;
 
 /**
- * Define una columna en una tabla de DeskDB.
+ * Defines a column in a DeskDB table.
  */
 public class Column {
     private final String name;
@@ -44,7 +44,7 @@ public class Column {
     public boolean isUnique() { return unique; }
     public Object getDefaultValue() { return defaultValue; }
     
-    // Setters para deserialización
+    // Setters for deserialization
     void setPrimaryKey(boolean primaryKey) { this.primaryKey = primaryKey; }
     void setNotNull(boolean notNull) { this.notNull = notNull; }
 }

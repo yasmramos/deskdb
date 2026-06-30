@@ -5,7 +5,7 @@ import java.sql.SQLException;
 import java.sql.Types;
 
 /**
- * Implementación de ResultSetMetaData para DeskDB.
+ * ResultSetMetaData implementation for DeskDB.
  */
 public class DeskDBResultSetMetaData implements ResultSetMetaData {
 
