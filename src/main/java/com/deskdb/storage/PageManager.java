@@ -135,16 +135,16 @@ public class PageManager {
     }
     
     /**
-     * Elimina la página menos recientemente usada del cache.
+     * Removes the least recently used page from the cache.
      */
     private void evictOldestPage() {
-        // Implementación simple: eliminar primera página del mapa
-        // En producción, usar LinkedHashMap con access-order=true
+        // Simple implementation: remove first page from map
+        // In production, use LinkedHashMap with access-order=true
         if (!pageCache.isEmpty()) {
             Long oldestKey = pageCache.keySet().iterator().next();
             Page page = pageCache.remove(oldestKey);
             if (page != null) {
-                page.flush(); // Asegurar persistencia antes de eliminar
+                page.flush(); // Ensure persistence before removing
             }
         }
     }

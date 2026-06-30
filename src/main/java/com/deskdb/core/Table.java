@@ -2,7 +2,6 @@ package com.deskdb.core;
 
 import com.deskdb.query.*;
 import com.deskdb.index.BTree;
-import com.deskdb.storage.DataFile;
 import java.io.IOException;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -10,7 +9,7 @@ import java.util.stream.Collectors;
 public class Table {
     private final String name;
     private final List<Column> columns;
-    private final DataFile dataFile;
+    private final Map<Long, Row> data = new HashMap<>();
     private final Map<String, BTree> indexes = new HashMap<>();
     private final Map<String, String> columnToIndex = new HashMap<>();
     private long nextRowId = 1;
@@ -19,7 +18,6 @@ public class Table {
     public Table(String name, List<Column> columns, String dbPath) throws IOException {
         this.name = name;
         this.columns = Collections.unmodifiableList(new ArrayList<>(columns));
-        this.dataFile = new DataFile(dbPath + "." + name + ".dat", this.columns);
         
         for (Column col : columns) {
             if (col.isPrimaryKey()) {
@@ -30,6 +28,10 @@ public class Table {
 
     public String getName() { return name; }
     public List<Column> getColumns() { return columns; }
+    
+    public TableSchema getSchema() {
+        return new TableSchema(name, columns);
+    }
     
     private boolean hasColumn(String columnName) {
         for (Column c : columns) {
@@ -46,16 +48,11 @@ public class Table {
         indexes.put(indexName, btree);
         columnToIndex.put(columnName, indexName);
         
-        try {
-            List<Row> allRows = dataFile.readAll();
-            for (Row row : allRows) {
-                Object val = row.get(columnName);
-                if (val != null) {
-                    btree.insert((Comparable) val, row.getRowId());
-                }
+        for (Row row : data.values()) {
+            Object val = row.get(columnName);
+            if (val != null) {
+                btree.insert((Comparable) val, row.getRowId());
             }
-        } catch (IOException e) {
-            throw new RuntimeException("Error al re-indexar", e);
         }
     }
 
@@ -70,11 +67,13 @@ public class Table {
 
     public void insert(Row row) throws IOException {
         synchronized (lock) {
-            long rowId = dataFile.write(row);
+            long rowId = nextRowId++;
+            Row newRow = new Row(rowId, row.getValues());
+            data.put(rowId, newRow);
             
             for (Map.Entry<String, String> entry : columnToIndex.entrySet()) {
                 String colName = entry.getKey();
-                Object val = row.get(colName);
+                Object val = newRow.get(colName);
                 if (val != null) {
                     indexes.get(entry.getValue()).insert((Comparable) val, rowId);
                 }
@@ -84,7 +83,7 @@ public class Table {
 
     public List<Row> select(List<Filter> filters) throws IOException {
         if (filters == null || filters.isEmpty()) {
-            return dataFile.readAll();
+            return new ArrayList<>(data.values());
         }
 
         QueryOptimizer optimizer = new QueryOptimizer();
@@ -105,26 +104,27 @@ public class Table {
         if (indexOpt.isPresent() && bestFilter != null) {
             BTree index = indexOpt.get();
             List<Long> rowIds;
+            final Filter filterToApply = bestFilter;
 
             if (bestFilter.getOperator() == Filter.Operator.EQ) {
                 rowIds = index.search((Comparable) bestFilter.getValue());
             } else {
-                rowIds = dataFile.readAll().stream()
-                    .filter(r -> bestFilter.matches(r))
+                rowIds = data.values().stream()
+                    .filter(r -> filterToApply.apply(r))
                     .map(Row::getRowId)
                     .collect(Collectors.toList());
             }
 
             List<Row> result = new ArrayList<>();
             for (long id : rowIds) {
-                Row r = dataFile.read(id);
+                Row r = data.get(id);
                 if (r != null && matchesAllFilters(r, filters)) {
                     result.add(r);
                 }
             }
             return result;
         } else {
-            return dataFile.readAll().stream()
+            return data.values().stream()
                 .filter(r -> matchesAllFilters(r, filters))
                 .collect(Collectors.toList());
         }
@@ -132,19 +132,20 @@ public class Table {
 
     private boolean matchesAllFilters(Row row, List<Filter> filters) {
         for (Filter f : filters) {
-            if (!f.matches(row)) return false;
+            if (!f.apply(row)) return false;
         }
         return true;
     }
 
     public void update(long rowId, Map<String, Object> values) throws IOException {
         synchronized (lock) {
-            Row oldRow = dataFile.read(rowId);
+            Row oldRow = data.get(rowId);
             if (oldRow == null) return;
             
             Map<String, Object> newValues = new HashMap<>(oldRow.getValues());
             newValues.putAll(values);
             Row newRow = new Row(rowId, newValues);
+            data.put(rowId, newRow);
             
             for (String colName : columnToIndex.keySet()) {
                 if (values.containsKey(colName) || oldRow.get(colName) != null) {
@@ -156,14 +157,12 @@ public class Table {
                     if (newVal != null) idx.insert((Comparable) newVal, rowId);
                 }
             }
-            
-            dataFile.write(newRow);
         }
     }
 
     public void delete(long rowId) throws IOException {
         synchronized (lock) {
-            Row row = dataFile.read(rowId);
+            Row row = data.remove(rowId);
             if (row == null) return;
             
             for (Map.Entry<String, String> entry : columnToIndex.entrySet()) {
@@ -172,16 +171,18 @@ public class Table {
                     indexes.get(entry.getValue()).delete((Comparable) val, rowId);
                 }
             }
-            
-            dataFile.delete(rowId);
         }
     }
     
     public long size() throws IOException {
-        return dataFile.count();
+        return data.size();
     }
     
     public void close() throws IOException {
-        dataFile.close();
+        // No-op since we don't have a file anymore
+    }
+    
+    public Map<Long, Row> getData() {
+        return data;
     }
 }

@@ -3,17 +3,28 @@ package com.deskdb.query;
 import com.deskdb.core.Table;
 import com.deskdb.core.Filter;
 import com.deskdb.core.Row;
+import com.deskdb.core.Transaction;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 public class UpdateBuilder {
     private final Table table;
+    private final Transaction transaction;
+    private final String tableName;
     private final Map<String, Object> setValues = new HashMap<>();
     private Filter filter;
 
     public UpdateBuilder(Table table) {
         this.table = table;
+        this.transaction = null;
+        this.tableName = null;
+    }
+    
+    public UpdateBuilder(Transaction transaction, String tableName) {
+        this.table = null;
+        this.transaction = transaction;
+        this.tableName = tableName;
     }
 
     public UpdateBuilder set(String column, Object value) {
@@ -30,9 +41,23 @@ public class UpdateBuilder {
             throw new IllegalStateException("WHERE clause required for update");
         }
         
-        List<Row> rows = table.select(java.util.Collections.singletonList(filter));
+        List<Row> rows;
+        if (transaction != null) {
+            // Leer desde el snapshot + cambios pendientes
+            rows = transaction.select(tableName, java.util.Collections.singletonList(filter));
+        } else {
+            rows = table.select(java.util.Collections.singletonList(filter));
+        }
+        
         for (Row row : rows) {
-            table.update(row.getRowId(), setValues);
+            if (transaction != null) {
+                Map<String, Object> newValues = new HashMap<>(row.getValues());
+                newValues.putAll(setValues);
+                Row newRow = new Row(row.getRowId(), newValues);
+                transaction.applyChange(tableName, row.getRowId(), newRow);
+            } else {
+                table.update(row.getRowId(), setValues);
+            }
         }
         return rows.size();
     }

@@ -3,11 +3,16 @@ package com.deskdb.query;
 import com.deskdb.core.Table;
 import com.deskdb.core.Row;
 import com.deskdb.core.Filter;
+import com.deskdb.core.Transaction;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 
 public class SelectBuilder {
     private final Table table;
+    private final Transaction transaction;
+    private final String tableName;
     private final List<Filter> filters = new ArrayList<>();
     private List<String> columns;
     private int limit = -1;
@@ -17,6 +22,14 @@ public class SelectBuilder {
 
     public SelectBuilder(Table table) {
         this.table = table;
+        this.transaction = null;
+        this.tableName = null;
+    }
+    
+    public SelectBuilder(Transaction transaction, String tableName) {
+        this.table = null;
+        this.transaction = transaction;
+        this.tableName = tableName;
     }
 
     public SelectBuilder columns(String... cols) {
@@ -59,8 +72,29 @@ public class SelectBuilder {
     }
 
     public List<Row> execute() throws Exception {
-        // Usar el método select con lista de filtros directamente
-        return table.select(filters);
+        List<Row> results;
+        if (transaction != null) {
+            results = transaction.select(tableName, filters);
+        } else {
+            results = table.select(filters);
+        }
+        
+        // Si se especificaron columnas, filtrar los resultados
+        if (columns != null && !columns.isEmpty()) {
+            List<Row> filteredResults = new ArrayList<>();
+            for (Row row : results) {
+                Map<String, Object> filteredValues = new HashMap<>();
+                for (String col : columns) {
+                    if (row.getValues().containsKey(col)) {
+                        filteredValues.put(col, row.getValues().get(col));
+                    }
+                }
+                filteredResults.add(new Row(row.getRowId(), filteredValues));
+            }
+            return filteredResults;
+        }
+        
+        return results;
     }
 
     // Clase interna para construir filtros
@@ -99,7 +133,12 @@ public class SelectBuilder {
         }
 
         public SelectBuilder between(Object from, Object to) {
-            parent.addFilter(new Filter(column, Filter.Operator.ALL, new Object[]{from, to}));
+            parent.addFilter(new Filter(column, Filter.Operator.BETWEEN, from, to));
+            return parent;
+        }
+
+        public SelectBuilder eq(Object value) {
+            parent.addFilter(new Filter(column, Filter.Operator.EQ, value));
             return parent;
         }
     }
@@ -140,7 +179,12 @@ public class SelectBuilder {
         }
 
         public SelectBuilder between(Object from, Object to) {
-            builder.addFilter(new Filter(column, Filter.Operator.ALL, new Object[]{from, to}));
+            builder.addFilter(new Filter(column, Filter.Operator.BETWEEN, from, to));
+            return builder;
+        }
+
+        public SelectBuilder eq(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.EQ, value));
             return builder;
         }
     }
