@@ -6,13 +6,22 @@ public class Filter {
     private String column;
     private Operator operator;
     private Object value;
+    private Object value2; // Para BETWEEN (valor superior)
 
-    public enum Operator { EQ, GT, LT, GTE, LTE, NEQ, ALL }
+    public enum Operator { EQ, GT, LT, GTE, LTE, NEQ, BETWEEN, ALL }
 
     public Filter(String column, Operator operator, Object value) {
         this.column = column;
         this.operator = operator;
         this.value = value;
+    }
+    
+    // Constructor para BETWEEN
+    public Filter(String column, Operator operator, Object value, Object value2) {
+        this.column = column;
+        this.operator = operator;
+        this.value = value;
+        this.value2 = value2;
     }
 
     public String getColumn() { return column; }
@@ -20,6 +29,8 @@ public class Filter {
     public void setOperator(Operator operator) { this.operator = operator; }
     public Object getValue() { return value; }
     public void setValue(Object value) { this.value = value; }
+    public Object getValue2() { return value2; }
+    public void setValue2(Object value2) { this.value2 = value2; }
 
     @SuppressWarnings("unchecked")
     public boolean matches(Map<String, Object> row) {
@@ -33,6 +44,10 @@ public class Filter {
             case LT: return safeCompare(rowValue, value) < 0;
             case GTE: return safeCompare(rowValue, value) >= 0;
             case LTE: return safeCompare(rowValue, value) <= 0;
+            case BETWEEN: 
+                return value2 != null && 
+                       safeCompare(rowValue, value) >= 0 && 
+                       safeCompare(rowValue, value2) <= 0;
             case ALL: return true;
             default: return false;
         }
