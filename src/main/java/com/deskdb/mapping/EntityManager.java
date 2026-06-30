@@ -83,6 +83,15 @@ public class EntityManager {
         }
 
         try {
+            // Auto-generate ID if null
+            if (idValue == null) {
+                idValue = generateNextId(tableName, idColumnName);
+                values.put(idColumnName, idValue);
+                // Set the generated ID back to the entity
+                idField.setAccessible(true);
+                idField.set(entity, idValue);
+            }
+            
             // Check if entity already exists
             List<Row> existing = db.table(tableName)
                     .select()
@@ -105,6 +114,24 @@ public class EntityManager {
         } catch (Exception e) {
             throw new RuntimeException("Failed to persist entity", e);
         }
+    }
+
+    /**
+     * Generates the next available ID for a table by finding the maximum existing ID and adding 1.
+     */
+    private Long generateNextId(String tableName, String idColumnName) throws Exception {
+        List<Row> rows = db.table(tableName).select().execute();
+        long maxId = 0;
+        for (Row row : rows) {
+            Object idValue = row.get(idColumnName);
+            if (idValue instanceof Number) {
+                long id = ((Number) idValue).longValue();
+                if (id > maxId) {
+                    maxId = id;
+                }
+            }
+        }
+        return maxId + 1;
     }
 
     /**
