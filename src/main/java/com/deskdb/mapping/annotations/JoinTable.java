@@ -17,12 +17,12 @@ public @interface JoinTable {
     String name();
     
     /**
-     * The join columns for the owning entity.
+     * The name of the join column for the owning entity.
      */
-    JoinColumn[] joinColumns() default {};
+    String joinColumnName() default "";
     
     /**
-     * The inverse join columns for the related entity.
+     * The name of the inverse join column for the related entity.
      */
-    JoinColumn[] inverseJoinColumns() default {};
+    String inverseJoinColumnName() default "";
 }
