@@ -1,0 +1,17 @@
+com/deskdb/mapping/test/RelationshipMappingTest$Book.class
+com/deskdb/mapping/EntityManagerTest.class
+com/deskdb/storage/PageTest.class
+com/deskdb/mapping/EntityManagerTest$User.class
+com/deskdb/core/TransactionTest.class
+com/deskdb/mapping/EntityManagerTest$Product.class
+com/deskdb/storage/ColumnStoreTest.class
+com/deskdb/storage/RowLayoutTest.class
+com/deskdb/mapping/ManyToManyTest$Student.class
+com/deskdb/index/BTreeTest.class
+com/deskdb/mapping/test/RelationshipMappingTest.class
+com/deskdb/mapping/ManyToManyTest.class
+com/deskdb/mapping/ManyToManyTest$Course.class
+com/deskdb/jdbc/JDBCTest.class
+com/deskdb/storage/PrimitiveSerializerTest.class
+com/deskdb/core/DeskDBTest.class
+com/deskdb/mapping/test/RelationshipMappingTest$Author.class
