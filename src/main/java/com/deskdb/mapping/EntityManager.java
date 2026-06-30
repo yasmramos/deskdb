@@ -225,7 +225,7 @@ public class EntityManager {
                     continue;
                 }
 
-                // Handle regular columns
+                // Handle regular columns (Id, Column, or ManyToOne annotated fields without those annotations)
                 if (field.isAnnotationPresent(Id.class) || field.isAnnotationPresent(Column.class)) {
                     field.setAccessible(true);
                     String columnName = getColumnName(field);
@@ -234,6 +234,9 @@ public class EntityManager {
                     if (value != null) {
                         field.set(entity, value);
                     }
+                } else if (field.isAnnotationPresent(ManyToOne.class)) {
+                    // Already handled above, but skip to avoid double processing
+                    continue;
                 }
             }
 
