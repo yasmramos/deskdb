@@ -4,21 +4,11 @@
 *.o
 *.obj
 *.out
-
 # Dependencies
 .gradle/
-build/
-target/
-
 # Logs and temp files
 *.log
 *.tmp
-
-# Environment
-.env
-.env.local
-*.env.*
-
 # Editors
 .vscode/
 .idea/

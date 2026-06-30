@@ -31,6 +31,11 @@ public class UpdateBuilder {
         setValues.put(column, value);
         return this;
     }
+    
+    public UpdateBuilder set(Map<String, Object> values) {
+        setValues.putAll(values);
+        return this;
+    }
 
     public WhereCondition where(String column) {
         return new WhereCondition(column, this);
@@ -72,6 +77,11 @@ public class UpdateBuilder {
         }
 
         public UpdateBuilder is(Object value) {
+            parent.filter = new Filter(column, Filter.Operator.EQ, value);
+            return parent;
+        }
+        
+        public UpdateBuilder eq(Object value) {
             parent.filter = new Filter(column, Filter.Operator.EQ, value);
             return parent;
         }

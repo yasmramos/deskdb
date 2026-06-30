@@ -1,12 +1,11 @@
 package com.deskdb.mapping.annotations;
 
-import java.lang.annotation.ElementType;
-import java.lang.annotation.Retention;
-import java.lang.annotation.RetentionPolicy;
-import java.lang.annotation.Target;
+import java.lang.annotation.*;
 
-@Target(ElementType.FIELD)
-@Retention(RetentionPolicy.RUNTIME)
+/**
+ * Specifies the primary key generation strategy.
+ */
 public @interface GeneratedValue {
-    GenerationType strategy() default GenerationType.IDENTITY;
+    GenerationType strategy() default GenerationType.AUTO;
+    String generator() default "";
 }

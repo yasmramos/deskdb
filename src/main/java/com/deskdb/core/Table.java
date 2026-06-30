@@ -67,8 +67,19 @@ public class Table {
 
     public void insert(Row row) throws IOException {
         synchronized (lock) {
+            // Auto-generate ID for primary key column if null
+            Map<String, Object> values = new HashMap<>(row.getValues());
+            for (Column col : columns) {
+                if (col.isPrimaryKey() && col.getType() == DataType.INT) {
+                    if (!values.containsKey(col.getName()) || values.get(col.getName()) == null) {
+                        values.put(col.getName(), (int) nextRowId);
+                    }
+                    break;
+                }
+            }
+            
             long rowId = nextRowId++;
-            Row newRow = new Row(rowId, row.getValues());
+            Row newRow = new Row(rowId, values);
             data.put(rowId, newRow);
             
             for (Map.Entry<String, String> entry : columnToIndex.entrySet()) {
