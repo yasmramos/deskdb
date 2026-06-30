@@ -50,6 +50,12 @@ public class EntityManager {
 
             db.table(tableName).insert().insert(values).execute();
 
+            // Handle join table inserts for @ManyToMany after main entity is persisted
+            handleJoinTableInsert(entity);
+
+            // Create indexes if defined on the entity
+            createIndexesIfDefined(clazz);
+
             // Execute @PostPersist callbacks
             executeLifecycleCallback(entity, PostPersist.class);
         } catch (IllegalAccessException e) {
@@ -535,6 +541,34 @@ public class EntityManager {
         } catch (Exception e) {
             return 1;
         }
+    }
+
+    private void createIndexesIfDefined(Class<?> clazz) throws Exception {
+        Indexes indexesAnnotation = clazz.getAnnotation(Indexes.class);
+        if (indexesAnnotation != null) {
+            for (Index index : indexesAnnotation.value()) {
+                createIndex(clazz, index);
+            }
+        }
+        
+        // Also support single @Index annotation directly on class (if used without @Indexes wrapper)
+        Index singleIndex = clazz.getAnnotation(Index.class);
+        if (singleIndex != null) {
+            createIndex(clazz, singleIndex);
+        }
+    }
+
+    private void createIndex(Class<?> clazz, Index index) throws Exception {
+        String tableName = getTableName(clazz);
+        String indexName = index.name();
+        if (indexName == null || indexName.isEmpty()) {
+            indexName = "idx_" + tableName + "_" + index.columnList().replace(",", "_").replace(" ", "");
+        }
+        
+        String columnList = index.columnList();
+        boolean unique = index.unique();
+        
+        ((com.deskdb.core.DeskDB) db).createIndexInternal(tableName, indexName, columnList, unique);
     }
 
     private Map<String, Object> extractFieldValues(Object entity, boolean includeId) throws IllegalAccessException {

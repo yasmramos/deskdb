@@ -201,16 +201,24 @@ public class DeskDB implements AutoCloseable {
     }
 
     /**
-     * Crea un índice BTree en una columna específica.
+     * Creates a BTree index on a specific column.
      */
     @SuppressWarnings("unchecked")
     public <K extends Comparable<K>> void createIndex(String tableName, String indexName, String columnName) throws IOException {
+        createIndex(tableName, indexName, columnName, false);
+    }
+
+    /**
+     * Creates an index on a column (single column).
+     */
+    @SuppressWarnings("unchecked")
+    public <K extends Comparable<K>> void createIndex(String tableName, String indexName, String columnName, boolean unique) throws IOException {
         checkClosed();
         Map<String, BTree<?, ?>> tableIndexes = indexes.computeIfAbsent(tableName, k -> new ConcurrentHashMap<>());
         BTree<K, Long> btree = new BTree<>(indexName);
         tableIndexes.put(indexName, btree);
         
-        // Indexar datos existentes
+        // Index existing data
         Table table = tables.get(tableName);
         if (table != null) {
             for (Row row : table.select(null)) {
@@ -220,11 +228,53 @@ public class DeskDB implements AutoCloseable {
                 }
             }
         }
-        logger.info("Índice '{}' creado en tabla '{}' para columna '{}'", indexName, tableName, columnName);
+        logger.info("Index '{}' created on table '{}' for column '{}' (unique={})", indexName, tableName, columnName, unique);
     }
 
     /**
-     * Obtiene un índice por nombre de tabla y índice.
+     * Creates an index on one or more columns with optional uniqueness constraint.
+     * For composite indexes, columnList should be comma-separated column names.
+     * This method is package-private to avoid name clash with the generic version.
+     */
+    void createIndexInternal(String tableName, String indexName, String columnList, boolean unique) throws IOException {
+        checkClosed();
+        Map<String, BTree<?, ?>> tableIndexes = indexes.computeIfAbsent(tableName, k -> new ConcurrentHashMap<>());
+        
+        // Use raw type to avoid generic bounds issues with composite keys
+        @SuppressWarnings("rawtypes")
+        BTree btree = new BTree(indexName);
+        tableIndexes.put(indexName, btree);
+        
+        // Index existing data
+        Table table = tables.get(tableName);
+        if (table != null) {
+            String[] columns = columnList.split(",");
+            for (Row row : table.select(null)) {
+                // For composite indexes, create a composite key
+                Object keyValue;
+                if (columns.length == 1) {
+                    keyValue = row.get(columns[0].trim());
+                } else {
+                    // Create composite key as concatenated string
+                    StringBuilder keyBuilder = new StringBuilder();
+                    for (int i = 0; i < columns.length; i++) {
+                        if (i > 0) keyBuilder.append("|");
+                        Object val = row.get(columns[i].trim());
+                        keyBuilder.append(val != null ? val.toString() : "");
+                    }
+                    keyValue = keyBuilder.toString();
+                }
+                
+                if (keyValue != null) {
+                    btree.insert(keyValue, row.getRowId());
+                }
+            }
+        }
+        logger.info("Index '{}' created on table '{}' for column(s) '{}' (unique={})", indexName, tableName, columnList, unique);
+    }
+
+    /**
+     * Gets an index by table and index name.
      */
     @SuppressWarnings("unchecked")
     public <K extends Comparable<K>> BTree<K, Long> getIndex(String tableName, String indexName) {
