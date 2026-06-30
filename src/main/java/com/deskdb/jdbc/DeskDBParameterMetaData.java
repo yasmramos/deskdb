@@ -32,7 +32,7 @@ public class DeskDBParameterMetaData implements ParameterMetaData {
     
     @Override
     public int getParameterMode(int param) throws SQLException {
-        return ParameterMetaData.PARAM_MODE_IN;
+        return parameterModeIn;
     }
     
     @Override
