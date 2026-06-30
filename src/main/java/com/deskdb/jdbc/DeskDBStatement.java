@@ -427,10 +427,14 @@ public class DeskDBStatement implements Statement {
             insert.value(col, typedValue);
         }
         
-        if (tx != null) {
-            insert.execute(tx);
-        } else {
-            insert.execute();
+        try {
+            if (tx != null) {
+                insert.execute(tx);
+            } else {
+                insert.execute();
+            }
+        } catch (Exception e) {
+            throw new SQLException("Error al ejecutar INSERT", e);
         }
         
         return 1;
