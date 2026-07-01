@@ -1,52 +1,65 @@
 ```
-# Compressed archives
-*.tar.gz
-
-# Java build artifacts
+# Java/Maven build artifacts
+target/
 *.class
 *.jar
 *.war
 *.ear
+*.zip
 
-# Java build directories
-target/
-build/
+# Maven-specific
+**/maven-status/
+**/surefire-reports/
+jacoco.exec
+jacoco/
+*.exec
 
-# Dependencies
-lib/
-libs/
+# Compiled class file
+*.class
 
-# Logs
+# Log files
 *.log
+
+# Coverage reports
+jacoco/
+*.exec
+*.dump
+*.ec
+
+# Test reports
+**/surefire-reports/
+**/test-results/
+*.xml
+*.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
 
 # Environment
 .env
 .env.local
 *.env.*
 
-# Editors
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
+# OS generated files
 .DS_Store
 Thumbs.db
 
-# Coverage
-coverage/
-htmlcov/
-.coverage
+# Temporary files
+*.tmp
+*.temp
 
-# Python (if applicable)
+# Package manager
+node_modules/
+
+# Python (if any mixed projects)
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 .Python
-*.so
-*.egg-info/
-.eggs/
-dist/
+venv/
+.venv/
 ```
