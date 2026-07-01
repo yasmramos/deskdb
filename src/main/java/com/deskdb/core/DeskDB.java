@@ -1,6 +1,7 @@
 package com.deskdb.core;
 
 import com.deskdb.index.BTree;
+import com.deskdb.mapping.EntityManager;
 import com.deskdb.storage.Wal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -225,6 +226,16 @@ public class DeskDB implements AutoCloseable {
      */
     void registerSchema(String tableName, TableSchema schema) {
         schemas.put(tableName, schema);
+    }
+
+    /**
+     * Creates an EntityManager for ORM operations.
+     * 
+     * @return EntityManager instance for entity operations
+     */
+    public EntityManager createEntityManager() {
+        checkClosed();
+        return new EntityManager(this);
     }
 
     /**
