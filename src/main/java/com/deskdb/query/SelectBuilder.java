@@ -91,10 +91,37 @@ public class SelectBuilder {
                 }
                 filteredResults.add(new Row(row.getRowId(), filteredValues));
             }
-            return filteredResults;
+            results = filteredResults;
         }
         
-        return results;
+        // Aplicar ORDER BY si se especificó
+        if (orderByColumn != null && !orderByColumn.isEmpty()) {
+            results.sort((r1, r2) -> {
+                Object v1 = r1.get(orderByColumn);
+                Object v2 = r2.get(orderByColumn);
+                if (v1 == null && v2 == null) return 0;
+                if (v1 == null) return -1;
+                if (v2 == null) return 1;
+                
+                int cmp;
+                if (v1 instanceof Comparable && v2 instanceof Comparable) {
+                    cmp = ((Comparable) v1).compareTo((Comparable) v2);
+                } else {
+                    cmp = v1.toString().compareTo(v2.toString());
+                }
+                return orderByAsc ? cmp : -cmp;
+            });
+        }
+        
+        // Aplicar OFFSET y LIMIT
+        int start = Math.max(0, offset);
+        int end = limit < 0 ? results.size() : Math.min(results.size(), start + limit);
+        
+        if (start > results.size()) {
+            return new ArrayList<>();
+        }
+        
+        return results.subList(start, end);
     }
 
     // Clase interna para construir filtros
