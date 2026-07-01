@@ -3,6 +3,8 @@ package com.deskdb.mapping;
 import com.deskdb.core.DeskDB;
 import com.deskdb.core.Row;
 import com.deskdb.mapping.annotations.*;
+import com.deskdb.validation.EntityValidator;
+import com.deskdb.validation.ValidationException;
 
 import java.lang.reflect.Field;
 import java.nio.file.Path;
@@ -17,18 +19,37 @@ import java.util.Map;
 public class EntityManager {
 
     private final DeskDB db;
+    private final boolean autoValidate;
 
     public EntityManager(DeskDB db) {
         this.db = db;
+        this.autoValidate = true; // Enable auto-validation by default
+    }
+
+    public EntityManager(DeskDB db, boolean autoValidate) {
+        this.db = db;
+        this.autoValidate = autoValidate;
     }
 
     /**
      * Persists an entity to the database. If the entity already exists (based on ID), it updates it.
-     * Also handles ManyToOne relationships by storing foreign key values.
+     * Also handles ManyToOne, OneToMany, and ManyToMany relationships.
+     * Automatically validates the entity before persisting if autoValidate is enabled.
      */
     public <T> void persist(T entity) {
         Class<?> clazz = entity.getClass();
         validateEntity(clazz);
+
+        // Auto-validate entity before persisting
+        if (autoValidate) {
+            try {
+                EntityValidator.validateAndThrow(entity);
+            } catch (ValidationException e) {
+                throw new RuntimeException("Validation failed: " + e.getErrors(), e);
+            } catch (IllegalAccessException e) {
+                throw new RuntimeException("Failed to validate entity", e);
+            }
+        }
 
         String tableName = getTableName(clazz);
         Field idField = getIdField(clazz);
@@ -36,6 +57,30 @@ public class EntityManager {
         
         Map<String, Object> values = new HashMap<>();
         Object idValue = null;
+
+        // Auto-generate ID FIRST if null, before processing relationships
+        try {
+            idField.setAccessible(true);
+            idValue = idField.get(entity);
+            
+            if (idValue == null) {
+                try {
+                    Long generatedId = generateNextId(tableName, idColumnName);
+                    // Convert to Integer if the field type is Integer
+                    if (idField.getType() == Integer.class || idField.getType() == int.class) {
+                        idValue = generatedId.intValue();
+                    } else {
+                        idValue = generatedId;
+                    }
+                    // Set the generated ID back to the entity immediately
+                    idField.set(entity, idValue);
+                } catch (Exception e) {
+                    throw new RuntimeException("Failed to generate ID", e);
+                }
+            }
+        } catch (IllegalAccessException e) {
+            throw new RuntimeException("Failed to access or generate ID field", e);
+        }
 
         for (Field field : clazz.getDeclaredFields()) {
             // Skip transient fields
@@ -54,14 +99,98 @@ public class EntityManager {
                     
                     Object relatedEntity = field.get(entity);
                     if (relatedEntity != null) {
-                        // Extract ID from related entity
+                        // Persist related entity if it's new
                         Field relatedIdField = getIdField(relatedEntity.getClass());
                         relatedIdField.setAccessible(true);
                         Object relatedIdValue = relatedIdField.get(relatedEntity);
+                        
+                        // Check if related entity needs to be persisted first
+                        if (relatedIdValue == null) {
+                            persist(relatedEntity);
+                            relatedIdValue = relatedIdField.get(relatedEntity);
+                        }
+                        
                         values.put(joinColumnName, relatedIdValue);
                     }
                 } catch (IllegalAccessException e) {
                     throw new RuntimeException("Failed to access ManyToOne field: " + field.getName(), e);
+                }
+                continue;
+            }
+
+            // Handle ManyToMany relationships
+            if (field.isAnnotationPresent(ManyToMany.class)) {
+                field.setAccessible(true);
+                try {
+                    ManyToMany manyToMany = field.getAnnotation(ManyToMany.class);
+                    JoinTable joinTable = field.getAnnotation(JoinTable.class);
+                    
+                    if (joinTable != null) {
+                        String joinTableName = joinTable.name();
+                        JoinColumn[] joinColumns = joinTable.joinColumns();
+                        JoinColumn[] inverseJoinColumns = joinTable.inverseJoinColumns();
+                        
+                        // Get column names
+                        String ownerColumnName = (joinColumns != null && joinColumns.length > 0) ?
+                            joinColumns[0].name() : clazz.getSimpleName().toLowerCase() + "_id";
+                        String inverseColumnName = (inverseJoinColumns != null && inverseJoinColumns.length > 0) ?
+                            inverseJoinColumns[0].name() : field.getType().getSimpleName().replace("List", "").toLowerCase() + "_id";
+                        
+                        // Get related entities
+                        Object relatedEntities = field.get(entity);
+                        if (relatedEntities instanceof java.util.Collection) {
+                            java.util.Collection<?> relatedCollection = (java.util.Collection<?>) relatedEntities;
+                            
+                            // Persist each related entity if needed and collect IDs
+                            for (Object relatedEntity : relatedCollection) {
+                                // Persist related entity if it's new
+                                if (!isEntityPersisted(relatedEntity)) {
+                                    persist(relatedEntity);
+                                }
+                                
+                                // Get IDs
+                                Field ownerIdField = getIdField(clazz);
+                                ownerIdField.setAccessible(true);
+                                Object ownerId = ownerIdField.get(entity);
+                                
+                                Field relatedIdField = getIdField(relatedEntity.getClass());
+                                relatedIdField.setAccessible(true);
+                                Object relatedId = relatedIdField.get(relatedEntity);
+                                
+                                // Create join table if not exists
+                                createJoinTableIfNotExists(joinTableName, ownerColumnName, inverseColumnName, tableName, 
+                                    getTableName(relatedEntity.getClass()));
+                                
+                                // Insert into join table
+                                Map<String, Object> joinValues = new HashMap<>();
+                                joinValues.put(ownerColumnName, ownerId);
+                                joinValues.put(inverseColumnName, relatedId);
+                                
+                                // Check if relationship already exists
+                                List<Row> existing = db.table(joinTableName)
+                                    .select()
+                                    .where(ownerColumnName).eq(ownerId)
+                                    .execute();
+                                
+                                boolean exists = false;
+                                for (Row row : existing) {
+                                    Object inverseId = row.get(inverseColumnName);
+                                    if (inverseId != null && inverseId.equals(relatedId)) {
+                                        exists = true;
+                                        break;
+                                    }
+                                }
+                                
+                                if (!exists) {
+                                    db.table(joinTableName).insert().insert(joinValues).execute();
+                                }
+                            }
+                        }
+                    }
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException("Failed to access ManyToMany field: " + field.getName(), e);
+                } catch (Exception e) {
+                    throw new RuntimeException("Failed to process ManyToMany relationship: " + field.getName(), e);
                 }
                 continue;
             }
@@ -84,21 +213,6 @@ public class EntityManager {
         }
 
         try {
-            // Auto-generate ID if null
-            if (idValue == null) {
-                Long generatedId = generateNextId(tableName, idColumnName);
-                // Convert to Integer if the field type is Integer
-                if (idField.getType() == Integer.class || idField.getType() == int.class) {
-                    idValue = generatedId.intValue();
-                } else {
-                    idValue = generatedId;
-                }
-                values.put(idColumnName, idValue);
-                // Set the generated ID back to the entity
-                idField.setAccessible(true);
-                idField.set(entity, idValue);
-            }
-            
             // Check if entity already exists
             List<Row> existing = db.table(tableName)
                     .select()
@@ -260,7 +374,79 @@ public class EntityManager {
                     continue;
                 }
 
-                // Handle regular columns (Id, Column, or ManyToOne annotated fields without those annotations)
+                // Handle OneToOne relationships (similar to ManyToOne)
+                if (field.isAnnotationPresent(OneToOne.class)) {
+                    field.setAccessible(true);
+                    OneToOne oneToOne = field.getAnnotation(OneToOne.class);
+                    JoinColumn[] joinColumns = oneToOne.joinColumn();
+                    String joinColumnName = (joinColumns == null || joinColumns.length == 0) ? 
+                        field.getName() + "_id" : joinColumns[0].name();
+                    
+                    Object foreignKeyId = row.get(joinColumnName);
+                    if (foreignKeyId != null) {
+                        Class<?> targetEntity = oneToOne.targetEntity();
+                        EntityManager targetEm = new EntityManager(db);
+                        Object relatedEntity = targetEm.find(targetEntity, foreignKeyId);
+                        field.set(entity, relatedEntity);
+                    }
+                    continue;
+                }
+
+                // Handle ManyToMany relationships
+                if (field.isAnnotationPresent(ManyToMany.class)) {
+                    field.setAccessible(true);
+                    ManyToMany manyToMany = field.getAnnotation(ManyToMany.class);
+                    JoinTable joinTable = manyToMany.joinTable();
+                    
+                    if (joinTable != null && !joinTable.name().isEmpty()) {
+                        String joinTableName = joinTable.name();
+                        JoinColumn[] joinColumns = joinTable.joinColumns();
+                        JoinColumn[] inverseJoinColumns = joinTable.inverseJoinColumns();
+                        
+                        String ownerColumnName = (joinColumns == null || joinColumns.length == 0) ? 
+                            getTableName(clazz) + "_id" : joinColumns[0].name();
+                        String inverseColumnName = (inverseJoinColumns == null || inverseJoinColumns.length == 0) ? 
+                            field.getType().getSimpleName().toLowerCase() + "_id" : inverseJoinColumns[0].name();
+                        
+                        // Get the ID of the current entity
+                        Field idField = getIdField(clazz);
+                        idField.setAccessible(true);
+                        Object currentEntityId = idField.get(entity);
+                        
+                        if (currentEntityId != null) {
+                            // Query the join table to get related IDs
+                            List<Row> joinRows = db.table(joinTableName)
+                                .select()
+                                .where(ownerColumnName)
+                                .eq(currentEntityId)
+                                .execute();
+                            
+                            if (!joinRows.isEmpty()) {
+                                Class<?> targetEntity = field.getType().getGenericSuperclass() instanceof java.lang.reflect.ParameterizedType ?
+                                    (Class<?>) ((java.lang.reflect.ParameterizedType) field.getType().getGenericSuperclass()).getActualTypeArguments()[0] :
+                                    field.getType();
+                                
+                                List<Object> relatedEntities = new ArrayList<>();
+                                EntityManager targetEm = new EntityManager(db);
+                                
+                                for (Row joinRow : joinRows) {
+                                    Object relatedId = joinRow.get(inverseColumnName);
+                                    if (relatedId != null) {
+                                        Object relatedEntity = targetEm.find(targetEntity, relatedId);
+                                        if (relatedEntity != null) {
+                                            relatedEntities.add(relatedEntity);
+                                        }
+                                    }
+                                }
+                                
+                                field.set(entity, relatedEntities);
+                            }
+                        }
+                    }
+                    continue;
+                }
+
+                // Handle regular columns (Id, Column, or basic fields without annotations)
                 if (field.isAnnotationPresent(Id.class) || field.isAnnotationPresent(Column.class)) {
                     field.setAccessible(true);
                     String columnName = getColumnName(field);
@@ -269,9 +455,15 @@ public class EntityManager {
                     if (value != null) {
                         field.set(entity, value);
                     }
-                } else if (field.isAnnotationPresent(ManyToOne.class)) {
-                    // Already handled above, but skip to avoid double processing
-                    continue;
+                } else if (!field.isAnnotationPresent(ManyToOne.class) && !field.isAnnotationPresent(OneToOne.class) && !field.isAnnotationPresent(ManyToMany.class) && !field.isAnnotationPresent(Transient.class)) {
+                    // Handle basic fields without annotations (like String, int, etc.)
+                    field.setAccessible(true);
+                    String columnName = field.getName();
+                    Object value = row.get(columnName);
+
+                    if (value != null) {
+                        field.set(entity, value);
+                    }
                 }
             }
 
@@ -311,5 +503,49 @@ public class EntityManager {
             }
         }
         return field.getName();
+    }
+
+    /**
+     * Checks if an entity is already persisted by looking for its ID in the database.
+     */
+    private boolean isEntityPersisted(Object entity) throws Exception {
+        Field idField = getIdField(entity.getClass());
+        idField.setAccessible(true);
+        Object idValue = idField.get(entity);
+        
+        if (idValue == null) {
+            return false;
+        }
+        
+        String tableName = getTableName(entity.getClass());
+        String idColumnName = getColumnName(idField);
+        
+        List<Row> existing = db.table(tableName)
+            .select()
+            .where(idColumnName)
+            .eq(idValue)
+            .execute();
+        
+        return !existing.isEmpty();
+    }
+
+    /**
+     * Creates a join table if it doesn't exist.
+     */
+    private void createJoinTableIfNotExists(String joinTableName, String ownerColumnName, String inverseColumnName, 
+                                            String ownerTableName, String relatedTableName) throws Exception {
+        // Check if table exists
+        try {
+            db.table(joinTableName).select().execute();
+            // Table exists, nothing to do
+            return;
+        } catch (Exception e) {
+            // Table doesn't exist, create it
+        }
+        
+        // Create join table with two foreign key columns
+        com.deskdb.core.Column col1 = new com.deskdb.core.Column(ownerColumnName, com.deskdb.core.DataType.INT);
+        com.deskdb.core.Column col2 = new com.deskdb.core.Column(inverseColumnName, com.deskdb.core.DataType.INT);
+        db.createTable(joinTableName, col1, col2);
     }
 }
