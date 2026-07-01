@@ -147,4 +147,27 @@ public class Serializer {
         ois.close();
         return obj;
     }
+    
+    /**
+     * Serializa un Map<String, Object> a bytes.
+     */
+    public static byte[] serialize(Map<String, Object> data) throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ObjectOutputStream oos = new ObjectOutputStream(baos);
+        oos.writeObject(data);
+        oos.close();
+        return baos.toByteArray();
+    }
+    
+    /**
+     * Deserializa bytes a Map<String, Object>.
+     */
+    @SuppressWarnings("unchecked")
+    public static Map<String, Object> deserialize(byte[] data) throws IOException, ClassNotFoundException {
+        ByteArrayInputStream bais = new ByteArrayInputStream(data);
+        ObjectInputStream ois = new ObjectInputStream(bais);
+        Map<String, Object> obj = (Map<String, Object>) ois.readObject();
+        ois.close();
+        return obj;
+    }
 }
