@@ -68,6 +68,10 @@ public class Transaction implements AutoCloseable {
         
         lock.writeLock().lock();
         try {
+            // Verificar conflictos con otras transacciones (optimistic concurrency control)
+            // En una implementación completa, se verificaría si las filas leídas/modificadas
+            // han cambiado desde el snapshot inicial
+            
             // Escribir todas las operaciones pendientes en WAL antes de aplicar cambios
             if (wal != null) {
                 try {
@@ -82,7 +86,8 @@ public class Transaction implements AutoCloseable {
                                 opType = OperationType.DELETE;
                             } else {
                                 Row row = changeEntry.getValue();
-                                if (row.getRowId() == 0 || !snapshots.getOrDefault(tableName, new HashMap<>()).containsKey(changeEntry.getKey())) {
+                                Map<Long, Row> snapshot = snapshots.getOrDefault(tableName, new HashMap<>());
+                                if (!snapshot.containsKey(changeEntry.getKey())) {
                                     // Inserción
                                     opType = OperationType.INSERT;
                                     data = com.deskdb.util.Serializer.serialize(row.getValues());
@@ -116,24 +121,14 @@ public class Transaction implements AutoCloseable {
                 if (table != null) {
                     Map<Long, Row> tableData = table.getData();
                     
-                    // Primero, calcular el siguiente ID disponible
-                    long nextId = tableData.keySet().stream().mapToLong(Long::longValue).max().orElse(0) + 1;
-                    
                     // Procesar todos los cambios
                     for (Map.Entry<Long, Row> changeEntry : entry.getValue().entrySet()) {
                         if (changeEntry.getValue() == null) {
                             // Eliminación
                             tableData.remove(changeEntry.getKey());
                         } else {
-                            Row row = changeEntry.getValue();
-                            if (row.getRowId() == 0) {
-                                // Es una inserción nueva, asignar ID real único
-                                Row newRow = new Row(nextId++, row.getValues());
-                                tableData.put(nextId - 1, newRow);
-                            } else {
-                                // Actualización o inserción con ID específico
-                                tableData.put(changeEntry.getKey(), changeEntry.getValue());
-                            }
+                            // Inserción o actualización
+                            tableData.put(changeEntry.getKey(), changeEntry.getValue());
                         }
                     }
                 }
