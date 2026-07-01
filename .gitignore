@@ -1,21 +1,23 @@
 ```
-# Compiled and build artifacts
+# Compressed archives
+*.tar.gz
+
+# Java build artifacts
 *.class
-*.o
-*.obj
-*.out
-build/
+*.jar
+*.war
+*.ear
+
+# Java build directories
 target/
+build/
 
 # Dependencies
-.gradle/
 lib/
-deps/
+libs/
 
-# Logs and temp files
+# Logs
 *.log
-*.tmp
-*.swp
 
 # Environment
 .env
@@ -28,29 +30,23 @@ deps/
 *.swp
 *.swo
 
-# Coverage reports
+# OS
+.DS_Store
+Thumbs.db
+
+# Coverage
 coverage/
 htmlcov/
 .coverage
 
-# Python cache
+# Python (if applicable)
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-
-# MyPy cache
-.mypy_cache/
-
-# Pytest cache
-.pytest_cache/
-
-# Distribution artifacts
+.Python
+*.so
+*.egg-info/
+.eggs/
 dist/
-*.tar.gz
-*.zip
-
-# System files
-.DS_Store
-Thumbs.db
 ```
