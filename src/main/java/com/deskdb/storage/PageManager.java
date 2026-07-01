@@ -78,8 +78,9 @@ public class PageManager {
     /**
      * Asigna una nueva página libre.
      * Retorna el número de página asignada.
+     * Thread-safe: usa sincronización para evitar colisiones.
      */
-    public Page allocatePage() throws IOException {
+    public synchronized Page allocatePage() throws IOException {
         // Buscar primera página libre (flags == 0xFFFFFFFF o no usada)
         // Por simplicidad, asignamos al final del archivo
         long newPageNumber = channel.size() / Page.PAGE_SIZE;
