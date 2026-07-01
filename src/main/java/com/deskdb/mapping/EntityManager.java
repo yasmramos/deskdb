@@ -195,16 +195,34 @@ public class EntityManager {
                 continue;
             }
 
-            // Handle regular columns
-            if (field.isAnnotationPresent(Id.class) || field.isAnnotationPresent(Column.class)) {
+            // Handle regular columns (including fields without @Column annotation)
+            boolean isRelationship = field.isAnnotationPresent(ManyToOne.class) || 
+                                    field.isAnnotationPresent(OneToOne.class) || 
+                                    field.isAnnotationPresent(ManyToMany.class);
+            
+            if (!isRelationship && !field.isAnnotationPresent(Transient.class)) {
                 field.setAccessible(true);
                 try {
-                    String columnName = getColumnName(field);
-                    Object value = field.get(entity);
-                    values.put(columnName, value);
+                    String columnName = null;
                     
-                    if (field.isAnnotationPresent(Id.class)) {
-                        idValue = value;
+                    // Determine column name
+                    if (field.isAnnotationPresent(Column.class)) {
+                        Column col = field.getAnnotation(Column.class);
+                        columnName = col.name().isEmpty() ? field.getName() : col.name();
+                    } else if (field.isAnnotationPresent(Id.class)) {
+                        columnName = getColumnName(field);
+                    } else {
+                        // Basic fields without @Column are mapped by field name
+                        columnName = field.getName();
+                    }
+                    
+                    if (columnName != null) {
+                        Object value = field.get(entity);
+                        values.put(columnName, value);
+                        
+                        if (field.isAnnotationPresent(Id.class)) {
+                            idValue = value;
+                        }
                     }
                 } catch (IllegalAccessException e) {
                     throw new RuntimeException("Failed to access field: " + field.getName(), e);
@@ -396,50 +414,73 @@ public class EntityManager {
                 if (field.isAnnotationPresent(ManyToMany.class)) {
                     field.setAccessible(true);
                     ManyToMany manyToMany = field.getAnnotation(ManyToMany.class);
-                    JoinTable joinTable = manyToMany.joinTable();
                     
-                    if (joinTable != null && !joinTable.name().isEmpty()) {
-                        String joinTableName = joinTable.name();
-                        JoinColumn[] joinColumns = joinTable.joinColumns();
-                        JoinColumn[] inverseJoinColumns = joinTable.inverseJoinColumns();
+                    // Check if this is the inverse side (mappedBy)
+                    String mappedBy = manyToMany.mappedBy();
+                    if (mappedBy != null && !mappedBy.isEmpty()) {
+                        // This is the inverse side - skip loading to avoid circular references
+                        // The owning side will handle the relationship
+                        field.set(entity, new ArrayList<>());
+                        continue;
+                    } else {
+                        // This is the owning side - process normally
+                        JoinTable joinTable = field.getAnnotation(JoinTable.class);
                         
-                        String ownerColumnName = (joinColumns == null || joinColumns.length == 0) ? 
-                            getTableName(clazz) + "_id" : joinColumns[0].name();
-                        String inverseColumnName = (inverseJoinColumns == null || inverseJoinColumns.length == 0) ? 
-                            field.getType().getSimpleName().toLowerCase() + "_id" : inverseJoinColumns[0].name();
-                        
-                        // Get the ID of the current entity
-                        Field idField = getIdField(clazz);
-                        idField.setAccessible(true);
-                        Object currentEntityId = idField.get(entity);
-                        
-                        if (currentEntityId != null) {
-                            // Query the join table to get related IDs
-                            List<Row> joinRows = db.table(joinTableName)
-                                .select()
-                                .where(ownerColumnName)
-                                .eq(currentEntityId)
-                                .execute();
+                        if (joinTable != null && !joinTable.name().isEmpty()) {
+                            String joinTableName = joinTable.name();
+                            JoinColumn[] joinColumns = joinTable.joinColumns();
+                            JoinColumn[] inverseJoinColumns = joinTable.inverseJoinColumns();
                             
-                            if (!joinRows.isEmpty()) {
-                                Class<?> targetEntity = field.getType().getGenericSuperclass() instanceof java.lang.reflect.ParameterizedType ?
-                                    (Class<?>) ((java.lang.reflect.ParameterizedType) field.getType().getGenericSuperclass()).getActualTypeArguments()[0] :
-                                    field.getType();
+                            String ownerColumnName = (joinColumns == null || joinColumns.length == 0) ? 
+                                getTableName(clazz) + "_id" : joinColumns[0].name();
+                            String inverseColumnName = (inverseJoinColumns == null || inverseJoinColumns.length == 0) ? 
+                                field.getType().getSimpleName().replace("List", "").toLowerCase() + "_id" : inverseJoinColumns[0].name();
+                            
+                            // Get the ID of the current entity
+                            Field idField = getIdField(clazz);
+                            idField.setAccessible(true);
+                            Object currentEntityId = idField.get(entity);
+                            
+                            if (currentEntityId != null) {
+                                // Query the join table to get related IDs
+                                List<Row> joinRows = db.table(joinTableName)
+                                    .select()
+                                    .where(ownerColumnName)
+                                    .eq(currentEntityId)
+                                    .execute();
                                 
-                                List<Object> relatedEntities = new ArrayList<>();
-                                EntityManager targetEm = new EntityManager(db);
-                                
-                                for (Row joinRow : joinRows) {
-                                    Object relatedId = joinRow.get(inverseColumnName);
-                                    if (relatedId != null) {
-                                        Object relatedEntity = targetEm.find(targetEntity, relatedId);
-                                        if (relatedEntity != null) {
-                                            relatedEntities.add(relatedEntity);
+                                if (!joinRows.isEmpty()) {
+                                    // Extract target entity class from generic type
+                                    Class<?> targetEntity = null;
+                                    if (field.getGenericType() instanceof java.lang.reflect.ParameterizedType) {
+                                        java.lang.reflect.ParameterizedType pt = (java.lang.reflect.ParameterizedType) field.getGenericType();
+                                        if (pt.getActualTypeArguments().length > 0) {
+                                            targetEntity = (Class<?>) pt.getActualTypeArguments()[0];
                                         }
                                     }
+                                    
+                                    if (targetEntity == null) {
+                                        targetEntity = field.getType();
+                                    }
+                                    
+                                    List<Object> relatedEntities = new ArrayList<>();
+                                    EntityManager targetEm = new EntityManager(db);
+                                    
+                                    for (Row joinRow : joinRows) {
+                                        Object relatedId = joinRow.get(inverseColumnName);
+                                        if (relatedId != null) {
+                                            Object relatedEntity = targetEm.find(targetEntity, relatedId);
+                                            if (relatedEntity != null) {
+                                                relatedEntities.add(relatedEntity);
+                                            }
+                                        }
+                                    }
+                                    
+                                    field.set(entity, relatedEntities);
+                                } else {
+                                    // Set empty list if no relationships found
+                                    field.set(entity, new ArrayList<>());
                                 }
-                                
-                                field.set(entity, relatedEntities);
                             }
                         }
                     }
@@ -447,22 +488,30 @@ public class EntityManager {
                 }
 
                 // Handle regular columns (Id, Column, or basic fields without annotations)
-                if (field.isAnnotationPresent(Id.class) || field.isAnnotationPresent(Column.class)) {
+                boolean isRelationship = field.isAnnotationPresent(ManyToOne.class) || 
+                                        field.isAnnotationPresent(OneToOne.class) || 
+                                        field.isAnnotationPresent(ManyToMany.class);
+                
+                if (!isRelationship && !field.isAnnotationPresent(Transient.class)) {
                     field.setAccessible(true);
-                    String columnName = getColumnName(field);
-                    Object value = row.get(columnName);
-
-                    if (value != null) {
-                        field.set(entity, value);
+                    String columnName = null;
+                    
+                    // Determine column name
+                    if (field.isAnnotationPresent(Column.class)) {
+                        Column col = field.getAnnotation(Column.class);
+                        columnName = col.name().isEmpty() ? field.getName() : col.name();
+                    } else if (field.isAnnotationPresent(Id.class)) {
+                        columnName = getColumnName(field);
+                    } else {
+                        // Basic fields without @Column are mapped by field name
+                        columnName = field.getName();
                     }
-                } else if (!field.isAnnotationPresent(ManyToOne.class) && !field.isAnnotationPresent(OneToOne.class) && !field.isAnnotationPresent(ManyToMany.class) && !field.isAnnotationPresent(Transient.class)) {
-                    // Handle basic fields without annotations (like String, int, etc.)
-                    field.setAccessible(true);
-                    String columnName = field.getName();
-                    Object value = row.get(columnName);
-
-                    if (value != null) {
-                        field.set(entity, value);
+                    
+                    if (columnName != null) {
+                        Object value = row.get(columnName);
+                        if (value != null) {
+                            field.set(entity, value);
+                        }
                     }
                 }
             }

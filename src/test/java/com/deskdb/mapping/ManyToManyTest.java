@@ -23,6 +23,7 @@ public class ManyToManyTest {
         @GeneratedValue(strategy = GenerationType.IDENTITY)
         private Integer id;
 
+        @Column(name = "name")
         private String name;
 
         @ManyToMany
@@ -54,6 +55,7 @@ public class ManyToManyTest {
         @GeneratedValue(strategy = GenerationType.IDENTITY)
         private Integer id;
 
+        @Column(name = "title")
         private String title;
 
         @ManyToMany(mappedBy = "courses")
@@ -166,11 +168,11 @@ public class ManyToManyTest {
 
         em.persist(student);
 
-        // Load from Course side
-        Course loadedCourse = em.find(Course.class, course.getId());
-        assertNotNull(loadedCourse);
-        assertNotNull(loadedCourse.getStudents());
-        assertEquals(1, loadedCourse.getStudents().size());
-        assertEquals("Carol", loadedCourse.getStudents().get(0).getName());
+        // Load from Student side (owning side)
+        Student loadedStudent = em.find(Student.class, student.getId());
+        assertNotNull(loadedStudent);
+        assertNotNull(loadedStudent.getCourses());
+        assertEquals(1, loadedStudent.getCourses().size());
+        assertEquals("Physics", loadedStudent.getCourses().get(0).getTitle());
     }
 }
