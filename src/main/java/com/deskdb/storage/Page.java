@@ -40,8 +40,9 @@ public class Page {
         this.buffer = channel.map(FileChannel.MapMode.READ_WRITE, position, PAGE_SIZE);
         this.dirty = false;
         
-        // Inicializar header si es página nueva
-        if (getInt(0) == 0) {
+        // Inicializar header si es página nueva (verificar magic number correctamente)
+        buffer.position(0);
+        if (buffer.getInt() == 0) {
             initHeader();
         }
     }
