@@ -10,19 +10,31 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+
+import com.deskdb.storage.Wal;
+import com.deskdb.storage.Wal.OperationType;
 
 public class Transaction implements AutoCloseable {
     private static final Logger logger = LoggerFactory.getLogger(Transaction.class);
     
     private final DeskDB db;
+    private final long transactionId;
     private boolean active = true;
     private final Map<String, Map<Long, Row>> snapshots = new HashMap<>();
     private final Map<String, Map<Long, Row>> pendingChanges = new HashMap<>();
     private final Map<String, Long> nextRowIds = new HashMap<>();
     private boolean committed = false;
+    private final Wal wal;
+    private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
+    private static final AtomicLong transactionIdGenerator = new AtomicLong(0);
 
     public Transaction(DeskDB db) { 
         this.db = db;
+        this.transactionId = transactionIdGenerator.incrementAndGet();
+        this.wal = db.getWal(); // Obtener WAL de la base de datos
+        
         // Capturar snapshot de todas las tablas para rollback y aislamiento
         for (Map.Entry<String, Table> entry : db.getTables().entrySet()) {
             try {
@@ -36,6 +48,15 @@ public class Transaction implements AutoCloseable {
                 logger.warn("Error al capturar snapshot: {}", e.getMessage());
             }
         }
+        
+        // Escribir inicio de transacción en WAL
+        if (wal != null) {
+            try {
+                wal.write(transactionId, OperationType.CHECKPOINT, "", "BEGIN", new byte[0]);
+            } catch (IOException e) {
+                logger.error("Failed to write transaction start to WAL: {}", e.getMessage());
+            }
+        }
     }
 
     public TableOperations table(String tableName) { 
@@ -44,47 +65,107 @@ public class Transaction implements AutoCloseable {
 
     public void commit() {
         if (!active) throw new IllegalStateException("Transaction already closed");
-        active = false;
-        committed = true;
         
-        // Aplicar cambios pendientes a las tablas reales
-        for (Map.Entry<String, Map<Long, Row>> entry : pendingChanges.entrySet()) {
-            String tableName = entry.getKey();
-            Table table = db.getTable(tableName);
-            if (table != null) {
-                Map<Long, Row> tableData = table.getData();
-                
-                // Primero, calcular el siguiente ID disponible
-                long nextId = tableData.keySet().stream().mapToLong(Long::longValue).max().orElse(0) + 1;
-                
-                // Procesar todos los cambios
-                for (Map.Entry<Long, Row> changeEntry : entry.getValue().entrySet()) {
-                    if (changeEntry.getValue() == null) {
-                        // Eliminación
-                        tableData.remove(changeEntry.getKey());
-                    } else {
-                        Row row = changeEntry.getValue();
-                        if (row.getRowId() == 0) {
-                            // Es una inserción nueva, asignar ID real único
-                            Row newRow = new Row(nextId++, row.getValues());
-                            tableData.put(nextId - 1, newRow);
+        lock.writeLock().lock();
+        try {
+            // Escribir todas las operaciones pendientes en WAL antes de aplicar cambios
+            if (wal != null) {
+                try {
+                    for (Map.Entry<String, Map<Long, Row>> entry : pendingChanges.entrySet()) {
+                        String tableName = entry.getKey();
+                        for (Map.Entry<Long, Row> changeEntry : entry.getValue().entrySet()) {
+                            OperationType opType;
+                            byte[] data = new byte[0];
+                            
+                            if (changeEntry.getValue() == null) {
+                                // Eliminación
+                                opType = OperationType.DELETE;
+                            } else {
+                                Row row = changeEntry.getValue();
+                                if (row.getRowId() == 0 || !snapshots.getOrDefault(tableName, new HashMap<>()).containsKey(changeEntry.getKey())) {
+                                    // Inserción
+                                    opType = OperationType.INSERT;
+                                    data = com.deskdb.util.Serializer.serialize(row.getValues());
+                                } else {
+                                    // Actualización
+                                    opType = OperationType.UPDATE;
+                                    data = com.deskdb.util.Serializer.serialize(row.getValues());
+                                }
+                            }
+                            
+                            wal.write(transactionId, opType, tableName, String.valueOf(changeEntry.getKey()), data);
+                        }
+                    }
+                    
+                    // Escribir COMMIT en WAL
+                    wal.writeCommit(transactionId);
+                    wal.writeCheckpoint(transactionId);
+                } catch (IOException e) {
+                    logger.error("Failed to write to WAL during commit: {}", e.getMessage());
+                    throw new RuntimeException("WAL write failed", e);
+                }
+            }
+            
+            active = false;
+            committed = true;
+            
+            // Aplicar cambios pendientes a las tablas reales
+            for (Map.Entry<String, Map<Long, Row>> entry : pendingChanges.entrySet()) {
+                String tableName = entry.getKey();
+                Table table = db.getTable(tableName);
+                if (table != null) {
+                    Map<Long, Row> tableData = table.getData();
+                    
+                    // Primero, calcular el siguiente ID disponible
+                    long nextId = tableData.keySet().stream().mapToLong(Long::longValue).max().orElse(0) + 1;
+                    
+                    // Procesar todos los cambios
+                    for (Map.Entry<Long, Row> changeEntry : entry.getValue().entrySet()) {
+                        if (changeEntry.getValue() == null) {
+                            // Eliminación
+                            tableData.remove(changeEntry.getKey());
                         } else {
-                            // Actualización o inserción con ID específico
-                            tableData.put(changeEntry.getKey(), changeEntry.getValue());
+                            Row row = changeEntry.getValue();
+                            if (row.getRowId() == 0) {
+                                // Es una inserción nueva, asignar ID real único
+                                Row newRow = new Row(nextId++, row.getValues());
+                                tableData.put(nextId - 1, newRow);
+                            } else {
+                                // Actualización o inserción con ID específico
+                                tableData.put(changeEntry.getKey(), changeEntry.getValue());
+                            }
                         }
                     }
                 }
             }
+            
+            logger.info("Transaction {} committed successfully", transactionId);
+        } finally {
+            lock.writeLock().unlock();
         }
     }
 
     public void rollback() {
         if (!active || committed) return;
-        active = false;
         
-        // NO restaurar snapshots - los commits son atómicos y persistentes
-        // El rollback solo descarta cambios pendientes de esta transacción
-        logger.debug("Transaction rolled back");
+        lock.writeLock().lock();
+        try {
+            // Escribir ROLLBACK en WAL
+            if (wal != null) {
+                try {
+                    wal.writeRollback(transactionId);
+                } catch (IOException e) {
+                    logger.error("Failed to write rollback to WAL: {}", e.getMessage());
+                }
+            }
+            
+            active = false;
+            // NO restaurar snapshots - los commits son atómicos y persistentes
+            // El rollback solo descarta cambios pendientes de esta transacción
+            logger.info("Transaction {} rolled back", transactionId);
+        } finally {
+            lock.writeLock().unlock();
+        }
     }
 
     @Override
@@ -121,18 +202,88 @@ public class Transaction implements AutoCloseable {
 
     /**
      * Recovers the database state from the WAL.
-     * This is a simplified implementation that only deletes the WAL if it exists.
+     * Applies all committed transactions that were not yet persisted to the main data file.
      */
     public static void recover(DeskDB db, Path walPath) throws IOException {
-        // Simplified implementation: in production, it would read the WAL and apply pending committed operations
-        // For now, we just delete the WAL assuming it was processed.
-        logger.info("Recovering from WAL: {}", walPath);
-        if (Files.exists(walPath)) {
-            // Real WAL replay logic would go here
-            // For simplicity, we delete it to avoid errors on subsequent opens
-            Files.delete(walPath);
-            logger.info("WAL deleted after simulated recovery");
+        logger.info("Starting recovery from WAL: {}", walPath);
+        
+        if (!Files.exists(walPath)) {
+            logger.info("No WAL file found, skipping recovery");
+            return;
         }
+        
+        List<Wal.WalEntry> entries = Wal.recover(walPath);
+        
+        if (entries.isEmpty()) {
+            logger.info("No pending entries to recover");
+            return;
+        }
+        
+        // Agrupar entradas por transacción
+        Map<Long, List<Wal.WalEntry>> transactions = new HashMap<>();
+        for (Wal.WalEntry entry : entries) {
+            transactions.computeIfAbsent(entry.transactionId, k -> new ArrayList<>()).add(entry);
+        }
+        
+        // Aplicar transacciones en orden
+        for (Map.Entry<Long, List<Wal.WalEntry>> txEntry : transactions.entrySet()) {
+            long txId = txEntry.getKey();
+            logger.info("Replaying transaction {}", txId);
+            
+            for (Wal.WalEntry entry : txEntry.getValue()) {
+                try {
+                    Table table = db.getTable(entry.tableName);
+                    if (table == null) {
+                        logger.warn("Table {} not found during recovery", entry.tableName);
+                        continue;
+                    }
+                    
+                    switch (entry.operation) {
+                        case INSERT:
+                            Map<String, Object> insertData = com.deskdb.util.Serializer.deserialize(entry.data);
+                            Row insertRow = new Row(0, insertData);
+                            table.insert(insertRow);
+                            logger.debug("Recovered INSERT: table={}, key={}", entry.tableName, entry.key);
+                            break;
+                            
+                        case UPDATE:
+                            Map<String, Object> updateData = com.deskdb.util.Serializer.deserialize(entry.data);
+                            long rowId = Long.parseLong(entry.key);
+                            // Actualizar fila existente
+                            Map<Long, Row> tableData = table.getData();
+                            Row existingRow = tableData.get(rowId);
+                            if (existingRow != null) {
+                                Row newRow = new Row(rowId, updateData);
+                                tableData.put(rowId, newRow);
+                            }
+                            logger.debug("Recovered UPDATE: table={}, key={}", entry.tableName, entry.key);
+                            break;
+                            
+                        case DELETE:
+                            long deleteRowId = Long.parseLong(entry.key);
+                            table.delete(deleteRowId);
+                            logger.debug("Recovered DELETE: table={}, key={}", entry.tableName, entry.key);
+                            break;
+                            
+                        default:
+                            logger.debug("Skipping non-data operation: {}", entry.operation);
+                    }
+                } catch (IOException e) {
+                    logger.error("Error replaying entry: {}", e.getMessage());
+                    throw e; // Re-lanzar para que el caller lo maneje
+                } catch (ClassNotFoundException e) {
+                    logger.error("Class not found during recovery: {}", e.getMessage());
+                    throw new IOException("Deserialization failed", e);
+                }
+            }
+        }
+        
+        // Truncar WAL después de recuperación exitosa
+        try (Wal wal = Wal.open(walPath)) {
+            wal.truncate();
+        }
+        
+        logger.info("Recovery completed successfully");
     }
     
     /**
