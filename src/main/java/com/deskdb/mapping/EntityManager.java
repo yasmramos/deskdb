@@ -40,6 +40,13 @@ public class EntityManager {
         Class<?> clazz = entity.getClass();
         validateEntity(clazz);
 
+        // Ensure table exists before persisting
+        try {
+            ensureTableExists(clazz);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to create table for entity: " + clazz.getName(), e);
+        }
+
         // Auto-validate entity before persisting
         if (autoValidate) {
             try {
@@ -596,5 +603,72 @@ public class EntityManager {
         com.deskdb.core.Column col1 = new com.deskdb.core.Column(ownerColumnName, com.deskdb.core.DataType.INT);
         com.deskdb.core.Column col2 = new com.deskdb.core.Column(inverseColumnName, com.deskdb.core.DataType.INT);
         db.createTable(joinTableName, col1, col2);
+    }
+
+    /**
+     * Ensures the entity table exists by creating it if necessary.
+     */
+    private void ensureTableExists(Class<?> clazz) throws Exception {
+        String tableName = getTableName(clazz);
+        
+        // Check if table exists
+        try {
+            db.table(tableName).select().execute();
+            // Table exists, nothing to do
+            return;
+        } catch (Exception e) {
+            // Table doesn't exist, create it
+        }
+        
+        // Build columns from entity fields
+        List<com.deskdb.core.Column> columns = new ArrayList<>();
+        Field idField = getIdField(clazz);
+        String idColumnName = getColumnName(idField);
+        columns.add(new com.deskdb.core.Column(idColumnName, com.deskdb.core.DataType.INT));
+        
+        for (Field field : clazz.getDeclaredFields()) {
+            if (field.isAnnotationPresent(Transient.class)) {
+                continue;
+            }
+            
+            boolean isRelationship = field.isAnnotationPresent(ManyToOne.class) || 
+                                    field.isAnnotationPresent(OneToOne.class) || 
+                                    field.isAnnotationPresent(ManyToMany.class);
+            
+            if (!isRelationship && !field.isAnnotationPresent(Id.class)) {
+                String columnName = field.isAnnotationPresent(Column.class) ? 
+                    field.getAnnotation(Column.class).name() : field.getName();
+                
+                // Determine column type based on Java field type
+                com.deskdb.core.DataType dataType = getDataTypeFromField(field.getType());
+                if (dataType != null) {
+                    columns.add(new com.deskdb.core.Column(columnName, dataType));
+                }
+            }
+        }
+        
+        // Create table with all columns
+        db.createTable(tableName, columns.toArray(new com.deskdb.core.Column[0]));
+    }
+
+    /**
+     * Maps Java field types to DeskDB DataType.
+     */
+    private com.deskdb.core.DataType getDataTypeFromField(Class<?> fieldType) {
+        if (fieldType == String.class) {
+            return com.deskdb.core.DataType.STRING;
+        } else if (fieldType == Integer.class || fieldType == int.class) {
+            return com.deskdb.core.DataType.INT;
+        } else if (fieldType == Long.class || fieldType == long.class) {
+            return com.deskdb.core.DataType.LONG;
+        } else if (fieldType == Double.class || fieldType == double.class) {
+            return com.deskdb.core.DataType.DOUBLE;
+        } else if (fieldType == Float.class || fieldType == float.class) {
+            return com.deskdb.core.DataType.DOUBLE; // Float maps to DOUBLE in DeskDB
+        } else if (fieldType == Boolean.class || fieldType == boolean.class) {
+            return com.deskdb.core.DataType.BOOLEAN;
+        }
+        // For unsupported types, default to STRING
+        return com.deskdb.core.DataType.STRING;
     }
 }
