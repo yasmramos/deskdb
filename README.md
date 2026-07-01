@@ -92,6 +92,31 @@ em.persist(new Product(1L, "Laptop", 999.99));
 em.getTransaction().commit();
 ```
 
+#### Explicit Table Creation
+
+You can also explicitly create tables with defined schemas using the `createTable()` method:
+
+```java
+// Create a table with explicit schema definition
+db.createTable("employees",
+    new Column("id", DataType.INTEGER).setPrimaryKey(true),
+    new Column("name", DataType.STRING).setNotNull(true),
+    new Column("salary", DataType.DOUBLE),
+    new Column("hire_date", DataType.LOCAL_DATE)
+);
+
+// Now you can insert data into the explicitly created table
+db.table("employees")
+  .insert()
+  .value("id", 1)
+  .value("name", "John Doe")
+  .value("salary", 75000.0)
+  .value("hire_date", LocalDate.now())
+  .execute();
+```
+
+This approach gives you full control over column types, primary keys, and constraints before inserting any data.
+
 ### CRUD Operations
 
 ```java
