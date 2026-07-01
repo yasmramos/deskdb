@@ -1,6 +1,8 @@
 package com.deskdb.storage;
 
 import com.deskdb.core.DataType;
+import com.deskdb.core.compression.ColumnCompressor;
+import com.deskdb.core.compression.NoOpCompressor;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -8,11 +10,28 @@ import java.nio.charset.StandardCharsets;
 /**
  * Serializadores primitivos optimizados sin reflexión.
  * Zero overhead, thread-safe, formato binario compacto.
+ * Soporta compresión de datos columnar.
  */
 public final class PrimitiveSerializer {
     
+    private static ColumnCompressor defaultCompressor = new NoOpCompressor();
+    
     private PrimitiveSerializer() {
         // Utility class
+    }
+    
+    /**
+     * Sets the default compressor for columnar data.
+     */
+    public static void setDefaultCompressor(ColumnCompressor compressor) {
+        defaultCompressor = compressor != null ? compressor : new NoOpCompressor();
+    }
+    
+    /**
+     * Gets the current default compressor.
+     */
+    public static ColumnCompressor getDefaultCompressor() {
+        return defaultCompressor;
     }
     
     /**
