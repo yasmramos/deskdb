@@ -25,6 +25,7 @@ public class ColumnStore {
     
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
     private int rowCount = 0;
+    private final Map<Long, Boolean> deletedRows = new HashMap<>();
     
     public ColumnStore(String tableName, List<Column> schema, PageManager pageManager) {
         this.tableName = tableName;
@@ -195,9 +196,6 @@ public class ColumnStore {
         }
     }
     
-    private final Map<Long, Boolean> deletedRows = new HashMap<>();
-    
-    
     /**
      * Elimina una fila (marca como eliminada, no compacta inmediatamente).
      */
@@ -278,6 +276,7 @@ public class ColumnStore {
      * Bloque de datos para una columna.
      * Almacena valores del mismo tipo en un ByteBuffer contiguo.
      * Usa formato de tamaño variable para soportar strings y tipos complejos.
+     * Soporta compresión opcional de datos.
      */
     private static class ColumnBlock {
         private final DataType dataType;
@@ -286,6 +285,8 @@ public class ColumnStore {
         private int size = 0;
         private int currentOffset; // Offset actual dentro de la página
         private static final int MAX_ENTRIES_PER_BLOCK = 1000;
+        private boolean compressed = false;
+        private int uncompressedSize = 0; // Tamaño antes de compresión
         
         public ColumnBlock(DataType dataType, PageManager pageManager) {
             this.dataType = dataType;
@@ -295,9 +296,10 @@ public class ColumnStore {
             } catch (java.io.IOException e) {
                 throw new RuntimeException("Failed to allocate page", e);
             }
-            // Inicializar offset después del header de página + metadata (rowCount)
-            this.currentOffset = Page.PAGE_HEADER_SIZE + 4; // 4 bytes para rowCount
+            // Inicializar offset después del header de página + metadata (rowCount + flags)
+            this.currentOffset = Page.PAGE_HEADER_SIZE + 8; // 4 bytes rowCount + 4 bytes flags
             writeRowCount();
+            writeFlags();
         }
         
         private void writeRowCount() {
@@ -306,10 +308,33 @@ public class ColumnStore {
             buffer.putInt(0); // rowCount inicial
         }
         
+        private void writeFlags() {
+            ByteBuffer buffer = page.getByteBuffer();
+            buffer.position(Page.PAGE_HEADER_SIZE + 4);
+            int flags = compressed ? 1 : 0;
+            buffer.putInt(flags);
+        }
+        
         private void updateRowCount() {
             ByteBuffer buffer = page.getByteBuffer();
             buffer.position(Page.PAGE_HEADER_SIZE);
             buffer.putInt(size); // actualizar rowCount
+        }
+        
+        private void updateFlags() {
+            ByteBuffer buffer = page.getByteBuffer();
+            buffer.position(Page.PAGE_HEADER_SIZE + 4);
+            int flags = compressed ? 1 : 0;
+            buffer.putInt(flags);
+        }
+        
+        public boolean isCompressed() {
+            return compressed;
+        }
+        
+        public void setCompressed(boolean compressed) {
+            this.compressed = compressed;
+            updateFlags();
         }
         
         public boolean isFull() {
@@ -372,8 +397,8 @@ public class ColumnStore {
                     throw new IndexOutOfBoundsException("Position " + position + " >= size " + rowCount);
                 }
                 
-                // Los datos comienzan después del rowCount (4 bytes)
-                int dataStart = Page.PAGE_HEADER_SIZE + 4;
+                // Los datos comienzan después del rowCount (4 bytes) + flags (4 bytes) = 8 bytes
+                int dataStart = Page.PAGE_HEADER_SIZE + 8;
                 buffer.position(dataStart);
                 
                 // Navegar hasta la posición deseada leyendo longitudes secuencialmente
@@ -403,8 +428,8 @@ public class ColumnStore {
                     throw new IndexOutOfBoundsException("Position " + position + " >= size " + rowCount);
                 }
                 
-                // Los datos comienzan después del rowCount (4 bytes)
-                int dataStart = Page.PAGE_HEADER_SIZE + 4;
+                // Los datos comienzan después del rowCount (4 bytes) + flags (4 bytes) = 8 bytes
+                int dataStart = Page.PAGE_HEADER_SIZE + 8;
                 buffer.position(dataStart);
                 
                 // Navegar hasta la posición deseada
@@ -434,10 +459,10 @@ public class ColumnStore {
                 } else {
                     // Nuevo valor es más grande - requeriría reescritura completa del bloque
                     // Por simplicidad, lanzamos excepción (en producción se haría defragmentación)
-                    // EXCEPCIÓN: Para STRING, permitimos updates si no exceden PAGE_SIZE
-                    if (dataType == DataType.STRING && newLength < Page.PAGE_SIZE - Page.PAGE_HEADER_SIZE - 16) {
-                        // Reescribir todo el bloque con el nuevo valor (simplificado)
-                        // Esto es costoso pero funciona para casos pequeños
+                    // EXCEPCIÓN: Para STRING y otros tipos variables, permitimos updates si no exceden PAGE_SIZE
+                    if ((dataType == DataType.STRING || dataType == DataType.DECIMAL || dataType == DataType.BLOB) 
+                        && newLength < Page.PAGE_SIZE - Page.PAGE_HEADER_SIZE - 16) {
+                        // Reescribir todo el bloque con el nuevo valor
                         rewriteBlockWithNewValue(position, newValue);
                     } else {
                         throw new IllegalStateException("Cannot update to larger value without defragmentation");
@@ -464,8 +489,8 @@ public class ColumnStore {
                         continue;
                     }
                     
-                    // Los datos comienzan después del rowCount (4 bytes)
-                    int dataStart = Page.PAGE_HEADER_SIZE + 4;
+                    // Los datos comienzan después del rowCount (4 bytes) + flags (4 bytes) = 8 bytes
+                    int dataStart = Page.PAGE_HEADER_SIZE + 8;
                     readBuffer.position(dataStart);
                     
                     // Navegar hasta la posición deseada
@@ -483,7 +508,7 @@ public class ColumnStore {
             // Reiniciar el bloque con los nuevos valores
             ByteBuffer buffer = page.getByteBuffer();
             buffer.clear();
-            currentOffset = Page.PAGE_HEADER_SIZE + 4; // Saltar rowCount
+            currentOffset = Page.PAGE_HEADER_SIZE + 8; // Saltar rowCount + flags
             size = 0;
             writeRowCount(); // Escribir rowCount inicial en 0
             
