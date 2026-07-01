@@ -58,29 +58,25 @@ public class DataFile {
     public synchronized long write(Row row) throws IOException {
         long rowId = row.getRowId();
         if (rowId == -1) {
-            rowId = nextRowId++;
-            row = new Row(rowId, row.getValues());
+            // Nueva fila: usar el contador interno de ColumnStore
+            Map<String, Object> values = row.getValues();
+            rowId = columnStore.insert(values);
+            row = new Row(rowId, values);
+        } else {
+            // Actualizar fila existente
+            Map<String, Object> values = row.getValues();
+            for (Column col : columns) {
+                Object value = values.get(col.getName());
+                columnStore.updateValue(rowId, col.getName(), value);
+            }
         }
 
         // Iniciar transacción MVCC
         long transactionVersion = mvcc.beginTransaction();
         
         try {
-            // Insertar/actualizar en ColumnStore
-            Map<String, Object> values = row.getValues();
-            if (columnStore.getRowCount() <= rowId) {
-                // Nueva fila
-                columnStore.insert(values);
-            } else {
-                // Actualizar fila existente
-                for (Column col : columns) {
-                    Object value = values.get(col.getName());
-                    columnStore.updateValue(rowId, col.getName(), value);
-                }
-            }
-            
             // Registrar en MVCC
-            mvcc.write(rowId, values, transactionVersion);
+            mvcc.write(rowId, row.getValues(), transactionVersion);
             currentTransactionVersion = transactionVersion;
         } catch (Exception e) {
             throw e;
@@ -127,7 +123,8 @@ public class DataFile {
 
     public synchronized List<Row> readAll() throws IOException {
         List<Row> result = new ArrayList<>();
-        int totalCount = columnStore.getRowCount() + getDeletedCount();
+        int totalCount = columnStore.getRowCount();
+        // Los rowIds comienzan en 0 y son consecutivos
         for (long rowId = 0; rowId < totalCount; rowId++) {
             Row row = read(rowId);
             if (row != null && !isDeleted(rowId)) {
@@ -159,7 +156,7 @@ public class DataFile {
     }
 
     public synchronized long count() {
-        int totalCount = columnStore.getRowCount() + getDeletedCount();
+        int totalCount = columnStore.getRowCount();
         long deletedCount = 0;
         // Contar filas eliminadas
         for (long rowId = 0; rowId < totalCount; rowId++) {
@@ -168,12 +165,6 @@ public class DataFile {
             }
         }
         return totalCount - deletedCount;
-    }
-
-    private int getDeletedCount() {
-        // Obtener el número de filas eliminadas desde ColumnStore
-        // Esto es un workaround ya que ColumnStore no expone este dato directamente
-        return 0; // Simplificación: asumimos que no hay filas eliminadas para contar
     }
 
     public String getFilePath() {

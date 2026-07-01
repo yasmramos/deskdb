@@ -249,6 +249,9 @@ public final class PrimitiveSerializer {
             case JSON:
                 writeString(buffer, (String) value);
                 break;
+            case DECIMAL:
+                writeDecimal(buffer, (java.math.BigDecimal) value);
+                break;
             default:
                 throw new IllegalArgumentException("Unsupported type: " + type);
         }
@@ -281,8 +284,42 @@ public final class PrimitiveSerializer {
                 return readBytes(buffer);
             case JSON:
                 return readString(buffer);
+            case DECIMAL:
+                return readDecimal(buffer);
             default:
                 throw new IllegalArgumentException("Unsupported type: " + type);
         }
+    }
+    
+    /**
+     * Escribe un BigDecimal con precisión y escala.
+     */
+    public static void writeDecimal(ByteBuffer buffer, java.math.BigDecimal value) {
+        if (value == null) {
+            buffer.put((byte) 0xFF); // Marker null
+            return;
+        }
+        
+        byte[] plainBytes = value.toPlainString().getBytes(StandardCharsets.UTF_8);
+        int lenBytes = writeVarInt(buffer, plainBytes.length);
+        buffer.put(plainBytes);
+    }
+    
+    /**
+     * Lee un BigDecimal desde su representación en string.
+     */
+    public static java.math.BigDecimal readDecimal(ByteBuffer buffer) {
+        byte marker = buffer.get();
+        if (marker == (byte) 0xFF) {
+            return null;
+        }
+        
+        // Retroceder un byte para leer la longitud correctamente
+        buffer.position(buffer.position() - 1);
+        int length = readVarInt(buffer);
+        byte[] bytes = new byte[length];
+        buffer.get(bytes);
+        String str = new String(bytes, StandardCharsets.UTF_8);
+        return new java.math.BigDecimal(str);
     }
 }
