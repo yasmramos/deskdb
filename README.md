@@ -52,10 +52,74 @@ mvn clean install
 
 ## Basic Usage
 
+### Creating Tables
+
+DeskDB uses schema-on-write, meaning tables are created automatically when you insert the first record. However, you can explicitly define table structure:
+
 ```java
 // Open/create a database
 DeskDB db = DeskDB.open("/path/to/my.deskdb");
 
+// Table is created automatically on first insert
+db.table("users")
+  .insert()
+  .value("name", "Ana")
+  .value("age", 30)
+  .value("email", "ana@example.com")
+  .execute();
+
+// Or use ORM with entity annotations (recommended for structured data)
+@Entity
+@Table(name = "products")
+public class Product {
+    @Id
+    @Column(name = "id")
+    private Long id;
+    
+    @Column(name = "name", nullable = false)
+    private String name;
+    
+    @Column(name = "price")
+    private Double price;
+    
+    // getters and setters
+}
+
+// EntityManager will create tables automatically
+EntityManager em = db.createEntityManager();
+em.getTransaction().begin();
+em.persist(new Product(1L, "Laptop", 999.99));
+em.getTransaction().commit();
+```
+
+#### Explicit Table Creation
+
+You can also explicitly create tables with defined schemas using the `createTable()` method:
+
+```java
+// Create a table with explicit schema definition
+db.createTable("employees",
+    new Column("id", DataType.INTEGER).setPrimaryKey(true),
+    new Column("name", DataType.STRING).setNotNull(true),
+    new Column("salary", DataType.DOUBLE),
+    new Column("hire_date", DataType.LOCAL_DATE)
+);
+
+// Now you can insert data into the explicitly created table
+db.table("employees")
+  .insert()
+  .value("id", 1)
+  .value("name", "John Doe")
+  .value("salary", 75000.0)
+  .value("hire_date", LocalDate.now())
+  .execute();
+```
+
+This approach gives you full control over column types, primary keys, and constraints before inserting any data.
+
+### CRUD Operations
+
+```java
 // Insert data
 db.table("users")
   .insert()
@@ -124,83 +188,6 @@ db.close();
 | TIMESTAMP | Timestamp with nanosecond precision | 8 bytes |
 | BLOB | Binary data | Variable |
 | JSON | JSON text | Variable |
-
-## Project Structure
-
-```
-com.deskdb
-├── core
-│   ├── DeskDB.java              # Main entry point
-│   ├── Table.java               # Table operations
-│   ├── TableOperations.java     # Fluent CRUD interface
-│   ├── Filter.java              # Query filters with AND/OR support
-│   ├── Row.java                 # Row representation
-│   ├── Column.java              # Column definition
-│   ├── TableSchema.java         # Schema management
-│   ├── Transaction.java         # ACID transactions with WAL
-│   ├── DataType.java            # Type definitions
-│   └── UniqueConstraintViolationException.java
-├── query
-│   ├── SelectBuilder.java       # SELECT query builder
-│   ├── InsertBuilder.java       # INSERT query builder
-│   ├── UpdateBuilder.java       # UPDATE query builder
-│   ├── DeleteBuilder.java       # DELETE query builder
-│   ├── Query.java               # Query abstraction
-│   ├── QueryPlan.java           # Query execution plan
-│   └── QueryOptimizer.java      # Query optimization
-├── storage
-│   ├── ColumnStore.java         # Columnar storage engine
-│   ├── DataFile.java            # File I/O management
-│   ├── Page.java                # Memory page structure
-│   ├── PageManager.java         # Page allocation/deallocation
-│   ├── RowLayout.java           # Row layout in pages
-│   ├── PrimitiveSerializer.java # Low-level serialization
-│   └── Wal.java                 # Write-Ahead Log
-├── index
-│   └── BTree.java               # B-Tree index implementation
-├── transaction
-│   └── MVCC.java                # Multi-Version Concurrency Control
-├── mapping
-│   ├── EntityManager.java       # ORM entity manager
-│   └── annotations/             # JPA-style annotations
-│       ├── Entity.java
-│       ├── Table.java
-│       ├── Id.java
-│       ├── Column.java
-│       ├── OneToOne.java
-│       ├── OneToMany.java
-│       ├── ManyToOne.java
-│       ├── ManyToMany.java
-│       ├── JoinTable.java
-│       ├── JoinColumn.java
-│       ├── GeneratedValue.java
-│       ├── Temporal.java
-│       ├── Enumerated.java
-│       ├── Lob.java
-│       ├── Transient.java
-│       └── Lifecycle callbacks...
-├── jdbc
-│   ├── DeskDBDriver.java        # JDBC driver
-│   ├── DeskDBConnection.java    # JDBC connection
-│   ├── DeskDBStatement.java     # JDBC statement
-│   ├── DeskDBPreparedStatement.java
-│   ├── DeskDBResultSet.java
-│   ├── DeskDBDatabaseMetaData.java
-│   ├── DeskDBResultSetMetaData.java
-│   └── DeskDBParameterMetaData.java
-├── pool
-│   └── DeskDBConnectionPool.java # Connection pooling
-├── validation
-│   ├── EntityValidator.java     # Bean validation
-│   ├── NotNull.java
-│   ├── Size.java
-│   ├── Min.java
-│   ├── Max.java
-│   └── ValidationException.java
-└── util
-    ├── Serializer.java          # JSON serialization
-    └── Checksum.java            # CRC32 checksums
-```
 
 ## Architecture Highlights
 
