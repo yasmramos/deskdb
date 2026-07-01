@@ -20,4 +20,9 @@ public @interface ManyToMany {
      * Whether to cascade persist operations.
      */
     boolean cascade() default true;
+    
+    /**
+     * The join table configuration for this relationship.
+     */
+    JoinTable joinTable() default @JoinTable(name = "");
 }

@@ -20,4 +20,14 @@ public @interface OneToOne {
      * Whether to cascade persist operations.
      */
     boolean cascade() default true;
+    
+    /**
+     * The target entity class.
+     */
+    Class<?> targetEntity() default void.class;
+    
+    /**
+     * The join column(s) for this relationship.
+     */
+    JoinColumn[] joinColumn() default {};
 }

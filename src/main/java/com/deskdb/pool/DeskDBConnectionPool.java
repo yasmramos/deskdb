@@ -1,7 +1,9 @@
 package com.deskdb.pool;
 
+import com.deskdb.core.DeskDB;
 import com.deskdb.jdbc.DeskDBConnection;
 
+import java.io.IOException;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.concurrent.BlockingQueue;
@@ -34,7 +36,10 @@ public class DeskDBConnectionPool {
         // Initialize pool with connections
         for (int i = 0; i < poolSize; i++) {
             try {
-                Connection conn = new DeskDBConnection(jdbcUrl);
+                // Extract DB path from JDBC URL (jdbc:deskdb:/path/to/db)
+                String dbPath = jdbcUrl.replace("jdbc:deskdb:", "");
+                DeskDB db = DeskDB.open(dbPath);
+                Connection conn = new DeskDBConnection(db, dbPath);
                 pool.offer(conn);
             } catch (Exception e) {
                 throw new SQLException("Failed to initialize connection pool", e);
@@ -60,7 +65,13 @@ public class DeskDBConnectionPool {
             // Validate connection before returning
             if (conn.isClosed()) {
                 // Replace with new connection
-                conn = new DeskDBConnection(jdbcUrl);
+                try {
+                    String dbPath = jdbcUrl.replace("jdbc:deskdb:", "");
+                    DeskDB db = DeskDB.open(dbPath);
+                    conn = new DeskDBConnection(db, dbPath);
+                } catch (IOException e) {
+                    throw new SQLException("Failed to create new connection", e);
+                }
             }
             
             return conn;
