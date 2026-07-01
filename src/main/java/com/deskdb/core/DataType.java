@@ -8,6 +8,7 @@ public enum DataType {
     INT,         // 4 bytes
     LONG,        // 8 bytes
     DOUBLE,      // 8 bytes
+    DECIMAL,     // BigDecimal, precisión arbitraria
     BOOLEAN,     // 1 byte
     DATE,        // 8 bytes (epoch millis)
     TIMESTAMP,   // 8 bytes (epoch millis) + nanos
@@ -26,6 +27,7 @@ public enum DataType {
                 return 4;
             case LONG:
             case DOUBLE:
+            case DECIMAL:
             case DATE:
             case TIMESTAMP:
                 return 8;
@@ -49,6 +51,7 @@ public enum DataType {
                 return 4;
             case LONG:
             case DOUBLE:
+            case DECIMAL:
             case DATE:
             case TIMESTAMP:
                 return 8;

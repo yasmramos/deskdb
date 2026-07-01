@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.*;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -50,6 +51,11 @@ public class Serializer {
             } else if (value instanceof Boolean) {
                 out.writeByte(5);
                 out.writeBoolean((Boolean) value);
+            } else if (value instanceof BigDecimal) {
+                out.writeByte(7);
+                byte[] decimalBytes = ((BigDecimal) value).toPlainString().getBytes(StandardCharsets.UTF_8);
+                out.writeInt(decimalBytes.length);
+                out.write(decimalBytes);
             } else {
                 // Fallback a serialización binaria para otros tipos
                 out.writeByte(6);
@@ -99,6 +105,12 @@ public class Serializer {
                     break;
                 case 5: // BOOLEAN
                     value = in.readBoolean();
+                    break;
+                case 7: // DECIMAL (BigDecimal)
+                    int decimalLen = in.readInt();
+                    byte[] decimalBytes = new byte[decimalLen];
+                    in.readFully(decimalBytes);
+                    value = new BigDecimal(new String(decimalBytes, StandardCharsets.UTF_8));
                     break;
                 case 6: // OBJECT
                     int objLen = in.readInt();

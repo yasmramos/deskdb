@@ -370,6 +370,157 @@ public class EntityManager {
         return findAll(entityType);
     }
 
+    /**
+     * Queries entities with optional WHERE clause and parameters.
+     * Supports simple filter conditions like \"field = ?\" or \"field > ?\".
+     */
+    public <T> List<T> query(Class<T> clazz, String whereClause, Object... params) {
+        validateEntity(clazz);
+        
+        String tableName = getTableName(clazz);
+        Field idField = getIdField(clazz);
+        String idColumnName = getColumnName(idField);
+        
+        try {
+            var selectBuilder = db.table(tableName).select();
+            
+            if (whereClause != null && !whereClause.isEmpty()) {
+                // Parse simple WHERE clause (e.g., \"name = ?\" or \"age > ?\")
+                String[] parts = whereClause.split("\\s+", 3);
+                if (parts.length >= 3) {
+                    String fieldName = parts[0];
+                    String operator = parts[1];
+                    
+                    // Build the condition using the query API
+                    var conditionBuilder = selectBuilder.where(fieldName);
+                    
+                    switch (operator) {
+                        case "=":
+                            conditionBuilder.eq(params[0]);
+                            break;
+                        case "!=":
+                        case "<>":
+                            conditionBuilder.ne(params[0]);
+                            break;
+                        case ">":
+                            conditionBuilder.gt(params[0]);
+                            break;
+                        case ">=":
+                            conditionBuilder.gte(params[0]);
+                            break;
+                        case "<":
+                            conditionBuilder.lt(params[0]);
+                            break;
+                        case "<=":
+                            conditionBuilder.lte(params[0]);
+                            break;
+                        default:
+                            // Default to equals if operator not recognized
+                            conditionBuilder.eq(params[0]);
+                    }
+                } else {
+                    // Fallback: treat entire clause as field name with equals
+                    selectBuilder.where(parts[0]).eq(params[0]);
+                }
+            }
+            
+            List<Row> rows = selectBuilder.execute();
+            
+            List<T> entities = new ArrayList<>();
+            for (Row row : rows) {
+                entities.add(mapToEntity(clazz, row));
+            }
+            
+            return entities;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to query entities", e);
+        }
+    }
+
+    /**
+     * Queries all entities of a given type without any filters.
+     */
+    public <T> List<T> query(Class<T> clazz) {
+        return query(clazz, null);
+    }
+
+    /**
+     * Updates an existing entity in the database.
+     * Automatically validates the entity before updating if autoValidate is enabled.
+     */
+    public <T> void update(T entity) {
+        Class<?> clazz = entity.getClass();
+        validateEntity(clazz);
+        
+        // Auto-validate entity before updating
+        if (autoValidate) {
+            try {
+                EntityValidator.validateAndThrow(entity);
+            } catch (ValidationException e) {
+                throw new RuntimeException("Validation failed: " + e.getErrors(), e);
+            } catch (IllegalAccessException e) {
+                throw new RuntimeException("Failed to validate entity", e);
+            }
+        }
+        
+        String tableName = getTableName(clazz);
+        Field idField = getIdField(clazz);
+        String idColumnName = getColumnName(idField);
+        
+        Map<String, Object> values = new HashMap<>();
+        Object idValue = null;
+        
+        try {
+            idField.setAccessible(true);
+            idValue = idField.get(entity);
+            
+            if (idValue == null) {
+                throw new RuntimeException("Cannot update entity with null ID");
+            }
+            
+            // Collect all field values except ID
+            for (Field field : clazz.getDeclaredFields()) {
+                if (field.isAnnotationPresent(Transient.class)) {
+                    continue;
+                }
+                
+                boolean isRelationship = field.isAnnotationPresent(ManyToOne.class) || 
+                                        field.isAnnotationPresent(OneToOne.class) || 
+                                        field.isAnnotationPresent(ManyToMany.class);
+                
+                if (!isRelationship && !field.isAnnotationPresent(Id.class)) {
+                    field.setAccessible(true);
+                    String columnName = null;
+                    
+                    if (field.isAnnotationPresent(Column.class)) {
+                        Column col = field.getAnnotation(Column.class);
+                        columnName = col.name().isEmpty() ? field.getName() : col.name();
+                    } else {
+                        columnName = field.getName();
+                    }
+                    
+                    if (columnName != null) {
+                        Object value = field.get(entity);
+                        values.put(columnName, value);
+                    }
+                }
+            }
+            
+            // Update the entity
+            db.table(tableName)
+                .update()
+                .set(values)
+                .where(idColumnName)
+                .eq(idValue)
+                .execute();
+                
+        } catch (IllegalAccessException e) {
+            throw new RuntimeException("Failed to access fields for update", e);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to update entity", e);
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private <T> T mapToEntity(Class<T> clazz, Row row) {
         try {
@@ -667,6 +818,8 @@ public class EntityManager {
             return com.deskdb.core.DataType.DOUBLE; // Float maps to DOUBLE in DeskDB
         } else if (fieldType == Boolean.class || fieldType == boolean.class) {
             return com.deskdb.core.DataType.BOOLEAN;
+        } else if (fieldType == java.math.BigDecimal.class) {
+            return com.deskdb.core.DataType.DECIMAL;
         }
         // For unsupported types, default to STRING
         return com.deskdb.core.DataType.STRING;
