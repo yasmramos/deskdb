@@ -52,10 +52,49 @@ mvn clean install
 
 ## Basic Usage
 
+### Creating Tables
+
+DeskDB uses schema-on-write, meaning tables are created automatically when you insert the first record. However, you can explicitly define table structure:
+
 ```java
 // Open/create a database
 DeskDB db = DeskDB.open("/path/to/my.deskdb");
 
+// Table is created automatically on first insert
+db.table("users")
+  .insert()
+  .value("name", "Ana")
+  .value("age", 30)
+  .value("email", "ana@example.com")
+  .execute();
+
+// Or use ORM with entity annotations (recommended for structured data)
+@Entity
+@Table(name = "products")
+public class Product {
+    @Id
+    @Column(name = "id")
+    private Long id;
+    
+    @Column(name = "name", nullable = false)
+    private String name;
+    
+    @Column(name = "price")
+    private Double price;
+    
+    // getters and setters
+}
+
+// EntityManager will create tables automatically
+EntityManager em = db.createEntityManager();
+em.getTransaction().begin();
+em.persist(new Product(1L, "Laptop", 999.99));
+em.getTransaction().commit();
+```
+
+### CRUD Operations
+
+```java
 // Insert data
 db.table("users")
   .insert()
