@@ -168,6 +168,31 @@ public class SelectBuilder {
             parent.addFilter(new Filter(column, Filter.Operator.EQ, value));
             return parent;
         }
+
+        public SelectBuilder ne(Object value) {
+            parent.addFilter(new Filter(column, Filter.Operator.NE, value));
+            return parent;
+        }
+
+        public SelectBuilder gt(Object value) {
+            parent.addFilter(new Filter(column, Filter.Operator.GT, value));
+            return parent;
+        }
+
+        public SelectBuilder gte(Object value) {
+            parent.addFilter(new Filter(column, Filter.Operator.GTE, value));
+            return parent;
+        }
+
+        public SelectBuilder lt(Object value) {
+            parent.addFilter(new Filter(column, Filter.Operator.LT, value));
+            return parent;
+        }
+
+        public SelectBuilder lte(Object value) {
+            parent.addFilter(new Filter(column, Filter.Operator.LTE, value));
+            return parent;
+        }
     }
     
     // Clase WhereCondition para compatibilidad con TableOperations

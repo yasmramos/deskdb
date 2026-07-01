@@ -12,7 +12,7 @@ public class Filter {
     private LogicalOperator logicalOp; // Para combinar filtros (AND/OR)
     private List<Filter> children; // Para condiciones anidadas
 
-    public enum Operator { EQ, GT, LT, GTE, LTE, NEQ, BETWEEN, ALL }
+    public enum Operator { EQ, GT, LT, GTE, LTE, NEQ, NE, BETWEEN, ALL }
     public enum LogicalOperator { AND, OR, NONE }
 
     public Filter(String column, Operator operator, Object value) {
