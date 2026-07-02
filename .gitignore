@@ -5,61 +5,35 @@ target/
 *.jar
 *.war
 *.ear
-*.zip
-
-# Maven-specific
-**/maven-status/
-**/surefire-reports/
-jacoco.exec
-jacoco/
-*.exec
-
-# Compiled class file
-*.class
-
-# Log files
-*.log
-
-# Coverage reports
-jacoco/
-*.exec
-*.dump
-*.ec
 
 # Test reports
 **/surefire-reports/
-**/test-results/
-*.xml
-*.txt
+*.exec
 
-# IDE
-.vscode/
+# Maven status files
+**/maven-status/
+
+# IDE files
 .idea/
-*.swp
-*.swo
+.vscode/
+*.iml
+*.ipr
+*.iws
 
-# Environment
-.env
-.env.local
-*.env.*
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.swp
+*~
 
 # OS generated files
 .DS_Store
 Thumbs.db
 
-# Temporary files
-*.tmp
-*.temp
-
-# Package manager
-node_modules/
-
-# Python (if any mixed projects)
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-venv/
-.venv/
+# Environment files
+.env
+.env.local
+*.env.*
 ```

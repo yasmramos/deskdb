@@ -13,6 +13,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * Native connection pool for DeskDB.
  * Provides efficient connection management for concurrent applications.
+ * 
+ * CRITICAL FIX: All connections in the pool now share the SAME DeskDB instance
+ * to ensure state consistency across connections. This fixes the issue where
+ * each connection had its own independent DeskDB instance with separate in-memory state.
  */
 public class DeskDBConnectionPool {
     
@@ -20,6 +24,8 @@ public class DeskDBConnectionPool {
     private final String jdbcUrl;
     private final int poolSize;
     private final AtomicBoolean isClosed = new AtomicBoolean(false);
+    private final DeskDB sharedDatabase; // Single shared DeskDB instance
+    private final String dbPath;
     
     /**
      * Creates a new connection pool.
@@ -31,15 +37,20 @@ public class DeskDBConnectionPool {
     public DeskDBConnectionPool(String jdbcUrl, int poolSize) throws SQLException {
         this.jdbcUrl = jdbcUrl;
         this.poolSize = poolSize;
+        this.dbPath = jdbcUrl.replace("jdbc:deskdb:", "");
         this.pool = new LinkedBlockingQueue<>(poolSize);
         
-        // Initialize pool with connections
+        // CRITICAL FIX: Create ONE shared DeskDB instance for the entire pool
+        try {
+            this.sharedDatabase = DeskDB.open(dbPath);
+        } catch (Exception e) {
+            throw new SQLException("Failed to open shared database instance", e);
+        }
+        
+        // Initialize pool with connections that all reference the same DeskDB instance
         for (int i = 0; i < poolSize; i++) {
             try {
-                // Extract DB path from JDBC URL (jdbc:deskdb:/path/to/db)
-                String dbPath = jdbcUrl.replace("jdbc:deskdb:", "");
-                DeskDB db = DeskDB.open(dbPath);
-                Connection conn = new DeskDBConnection(db, dbPath);
+                Connection conn = new DeskDBConnection(sharedDatabase, dbPath);
                 pool.offer(conn);
             } catch (Exception e) {
                 throw new SQLException("Failed to initialize connection pool", e);
@@ -64,12 +75,10 @@ public class DeskDBConnectionPool {
             
             // Validate connection before returning
             if (conn.isClosed()) {
-                // Replace with new connection
+                // Replace with new connection using the shared DeskDB instance
                 try {
-                    String dbPath = jdbcUrl.replace("jdbc:deskdb:", "");
-                    DeskDB db = DeskDB.open(dbPath);
-                    conn = new DeskDBConnection(db, dbPath);
-                } catch (IOException e) {
+                    conn = new DeskDBConnection(sharedDatabase, dbPath);
+                } catch (Exception e) {
                     throw new SQLException("Failed to create new connection", e);
                 }
             }
@@ -120,6 +129,15 @@ public class DeskDBConnectionPool {
                 } catch (SQLException e) {
                     // Log but continue closing other connections
                 }
+            }
+            
+            // Close the shared DeskDB instance
+            try {
+                if (sharedDatabase != null && !sharedDatabase.isClosed()) {
+                    sharedDatabase.close();
+                }
+            } catch (IOException e) {
+                // Log but continue
             }
         }
     }
