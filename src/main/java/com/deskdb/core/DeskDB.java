@@ -112,7 +112,7 @@ public class DeskDB implements AutoCloseable {
     /**
      * Obtiene una tabla por nombre para realizar operaciones dentro de una transacción.
      */
-    TableOperations table(String tableName, Transaction transaction) {
+    public TableOperations table(String tableName, Transaction transaction) {
         checkClosed();
         return new TableOperations(this, tableName, transaction);
     }
