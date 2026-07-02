@@ -44,10 +44,10 @@ public class ColumnStore {
             columnNames.add(col.getName());
             columnTypes.put(col.getName(), col.getType());
             columnData.put(col.getName(), new ArrayList<>());
-            // Inicializar diccionario solo para tipos STRING y JSON
-            if (col.getType() == DataType.STRING || col.getType() == DataType.JSON) {
-                columnDictionaries.put(col.getName(), new ColumnDictionary(col.getName()));
-            }
+            // No inicializar diccionarios temporalmente hasta fixear decoding
+            // if (col.getType() == DataType.STRING || col.getType() == DataType.JSON) {
+            //     columnDictionaries.put(col.getName(), new ColumnDictionary(col.getName()));
+            // }
         }
     }
     
