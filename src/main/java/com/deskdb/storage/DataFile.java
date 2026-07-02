@@ -21,6 +21,7 @@ public class DataFile {
     private final List<Column> columns;
     private long nextRowId = 1;
     private long currentTransactionVersion = 0;
+    private long nextTransactionId = 1;
 
     public DataFile(String filePath, List<Column> columns) throws IOException {
         this.filePath = filePath;
@@ -72,13 +73,16 @@ public class DataFile {
         }
 
         // Iniciar transacción MVCC
-        long transactionVersion = mvcc.beginTransaction();
+        long transactionId = nextTransactionId++;
+        long transactionVersion = mvcc.beginTransaction(transactionId);
         
         try {
             // Registrar en MVCC
-            mvcc.write(rowId, row.getValues(), transactionVersion);
+            mvcc.write(rowId, row.getValues(), transactionVersion, transactionId);
             currentTransactionVersion = transactionVersion;
+            mvcc.commitTransaction(transactionId);
         } catch (Exception e) {
+            mvcc.rollbackTransaction(transactionId);
             throw e;
         }
         
@@ -87,16 +91,19 @@ public class DataFile {
 
     public synchronized Row read(long rowId) throws IOException {
         // Obtener snapshot actual
-        long snapshotVersion = mvcc.beginTransaction();
+        long transactionId = nextTransactionId++;
+        long snapshotVersion = mvcc.beginTransaction(transactionId);
         
         try {
             // Leer desde MVCC primero (para consistencia transaccional)
-            Map<String, Object> mvccData = mvcc.read(rowId, snapshotVersion);
+            Map<String, Object> mvccData = mvcc.read(rowId, snapshotVersion, transactionId);
             
             if (mvccData != null) {
+                mvcc.commitTransaction(transactionId);
                 return new Row(rowId, mvccData);
             }
             
+            mvcc.commitTransaction(transactionId);
             // Fallback: leer directamente de ColumnStore si no hay versión MVCC
             Map<String, Object> values = new HashMap<>();
             for (Column col : columns) {
@@ -143,16 +150,30 @@ public class DataFile {
     }
 
     public synchronized void delete(long rowId) throws IOException {
-        long transactionVersion = mvcc.beginTransaction();
-        mvcc.delete(rowId, transactionVersion);
-        columnStore.delete(rowId);
-        currentTransactionVersion = transactionVersion;
+        long transactionId = nextTransactionId++;
+        long transactionVersion = mvcc.beginTransaction(transactionId);
+        try {
+            mvcc.delete(rowId, transactionVersion, transactionId);
+            columnStore.delete(rowId);
+            currentTransactionVersion = transactionVersion;
+            mvcc.commitTransaction(transactionId);
+        } catch (Exception e) {
+            mvcc.rollbackTransaction(transactionId);
+            throw e;
+        }
     }
 
     private boolean isDeleted(long rowId) {
-        long snapshotVersion = mvcc.beginTransaction();
-        Map<String, Object> data = mvcc.read(rowId, snapshotVersion);
-        return data == null;
+        long transactionId = nextTransactionId++;
+        long snapshotVersion = mvcc.beginTransaction(transactionId);
+        try {
+            Map<String, Object> data = mvcc.read(rowId, snapshotVersion, transactionId);
+            mvcc.commitTransaction(transactionId);
+            return data == null;
+        } catch (Exception e) {
+            mvcc.rollbackTransaction(transactionId);
+            return true;
+        }
     }
 
     public synchronized long count() {
