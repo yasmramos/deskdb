@@ -88,5 +88,10 @@ public class DeleteBuilder {
             parent.filter = new Filter(column, Filter.Operator.EQ, value);
             return parent;
         }
+
+        public DeleteBuilder isEqualTo(Object value) {
+            parent.filter = new Filter(column, Filter.Operator.EQ, value);
+            return parent;
+        }
     }
 }
