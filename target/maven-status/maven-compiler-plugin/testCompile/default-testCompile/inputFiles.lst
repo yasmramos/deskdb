@@ -1,0 +1,16 @@
+/workspace/src/test/java/com/deskdb/storage/RowLayoutTest.java
+/workspace/src/test/java/com/deskdb/core/storage/compression/ColumnDictionaryTest.java
+/workspace/src/test/java/com/deskdb/core/DeskDBTest.java
+/workspace/src/test/java/com/deskdb/core/TransactionTest.java
+/workspace/src/test/java/com/deskdb/storage/PageTest.java
+/workspace/src/test/java/com/deskdb/mapping/ImplicitColumnMappingTest.java
+/workspace/src/test/java/com/deskdb/index/BTreeTest.java
+/workspace/src/test/java/com/deskdb/jdbc/JDBCTest.java
+/workspace/src/test/java/com/deskdb/mapping/EntityManagerTest.java
+/workspace/src/test/java/com/deskdb/storage/PrimitiveSerializerTest.java
+/workspace/src/test/java/com/deskdb/util/SerializerTest.java
+/workspace/src/test/java/com/deskdb/mapping/ManyToManyTest.java
+/workspace/src/test/java/com/deskdb/mapping/DecimalTypeTest.java
+/workspace/src/test/java/com/deskdb/mapping/test/RelationshipMappingTest.java
+/workspace/src/test/java/com/deskdb/storage/ColumnStoreTest.java
+/workspace/src/test/java/com/deskdb/core/AdvancedQueryTest.java
