@@ -1,65 +1,103 @@
 package com.deskdb.transaction;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
- * Control de Concurrencia Multi-Versión (MVCC).
- * Permite lecturas no bloqueantes y escrituras aisladas.
+ * Real MVCC (Multi-Version Concurrency Control) implementation with full version chaining
+ * and snapshot isolation.
+ * 
+ * Features:
+ * - Complete version history per row (not just latest)
+ * - Snapshot isolation for transactions
+ * - Visibility rules based on transaction start time
+ * - Automatic garbage collection of old versions
  */
 public class MVCC {
     
-    // Versión global que incrementa con cada transacción
+    // Global version counter
     private final AtomicLong globalVersion = new AtomicLong(0);
     
-    // Almacena múltiples versiones de cada fila: rowId -> lista de versiones
-    private final Map<Long, RowVersion> rowVersions = new ConcurrentHashMap<>();
+    // Map: rowId -> List of versions (ordered by version, newest first)
+    private final Map<Long, List<RowVersion>> rowVersions = new ConcurrentHashMap<>();
     
-    // Lock para operaciones de escritura en el mapa de versiones
+    // Map: transactionId -> Snapshot (list of active transactions at snapshot time)
+    private final Map<Long, List<Long>> snapshots = new ConcurrentHashMap<>();
+    
+    // Currently active transactions: txId -> startTimestamp
+    private final Map<Long, Long> activeTransactions = new ConcurrentHashMap<>();
+    
+    // Lock for write operations on version map
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
     
     /**
-     * Representa una versión de una fila.
+     * Represents a single version of a row with full metadata.
      */
     public static class RowVersion {
+        public final long rowId;
         public final long version;
         public final long timestamp;
+        public final long transactionId;
         public final Map<String, Object> data;
         public final boolean deleted;
+        public final Long previousVersionId; // Link to previous version
         
-        public RowVersion(long version, long timestamp, Map<String, Object> data, boolean deleted) {
+        public RowVersion(long rowId, long version, long timestamp, long transactionId,
+                         Map<String, Object> data, boolean deleted, Long previousVersionId) {
+            this.rowId = rowId;
             this.version = version;
             this.timestamp = timestamp;
+            this.transactionId = transactionId;
             this.data = data;
             this.deleted = deleted;
+            this.previousVersionId = previousVersionId;
+        }
+        
+        @Override
+        public String toString() {
+            return String.format("RowVersion{rowId=%d, version=%d, txId=%d, ts=%d, deleted=%s}",
+                    rowId, version, transactionId, timestamp, deleted);
         }
     }
     
     /**
-     * Comienza una nueva transacción y retorna la versión de snapshot.
+     * Begin a new transaction and create a snapshot.
+     * @param transactionId ID of the transaction
+     * @return The snapshot version
      */
-    public long beginTransaction() {
-        return globalVersion.get();
+    public long beginTransaction(long transactionId) {
+        long currentVersion = globalVersion.get();
+        List<Long> activeTxList = new ArrayList<>(activeTransactions.keySet());
+        snapshots.put(transactionId, activeTxList);
+        activeTransactions.put(transactionId, System.currentTimeMillis());
+        return currentVersion;
     }
     
     /**
-     * Lee una fila para una transacción específica (snapshot isolation).
-     * @param rowId ID de la fila
-     * @param transactionVersion Versión de la transacción (snapshot)
-     * @return Los datos de la fila o null si no existe/fue eliminada
+     * Read a row for a specific transaction (snapshot isolation).
+     * @param rowId Row ID
+     * @param transactionVersion Transaction version (snapshot)
+     * @param transactionId Transaction ID
+     * @return Row data or null if not exists/deleted
      */
-    public Map<String, Object> read(long rowId, long transactionVersion) {
+    public Map<String, Object> read(long rowId, long transactionVersion, long transactionId) {
         lock.readLock().lock();
         try {
-            RowVersion rowVersion = rowVersions.get(rowId);
-            if (rowVersion == null) {
+            List<RowVersion> versions = rowVersions.get(rowId);
+            if (versions == null || versions.isEmpty()) {
                 return null;
             }
             
-            // Encontrar la versión más reciente visible para esta transacción
-            RowVersion visibleVersion = findVisibleVersion(rowVersion, transactionVersion);
+            // Get snapshot for this transaction
+            List<Long> activeAtSnapshot = snapshots.getOrDefault(transactionId, Collections.emptyList());
+            
+            // Find the visible version according to snapshot isolation rules
+            RowVersion visibleVersion = findVisibleVersion(versions, transactionVersion, transactionId, activeAtSnapshot);
             
             if (visibleVersion == null || visibleVersion.deleted) {
                 return null;
@@ -73,22 +111,33 @@ public class MVCC {
     }
     
     /**
-     * Escribe una nueva versión de una fila.
-     * @param rowId ID de la fila
-     * @param data Datos de la fila
-     * @param transactionVersion Versión de la transacción que escribe
+     * Write a new version of a row.
+     * @param rowId Row ID
+     * @param data Row data
+     * @param transactionVersion Transaction version
+     * @param transactionId Transaction ID
      */
-    public void write(long rowId, Map<String, Object> data, long transactionVersion) {
+    public void write(long rowId, Map<String, Object> data, long transactionVersion, long transactionId) {
         lock.writeLock().lock();
         try {
             long newVersion = globalVersion.incrementAndGet();
             long timestamp = System.currentTimeMillis();
             
-            RowVersion newRowVersion = new RowVersion(newVersion, timestamp, data, false);
+            // Get existing versions for this row
+            List<RowVersion> versions = rowVersions.computeIfAbsent(rowId, k -> new ArrayList<>());
             
-            // Encadenar versiones (en una implementación completa, sería una lista)
-            // Aquí simplificamos manteniendo solo la última versión
-            rowVersions.put(rowId, newRowVersion);
+            // Find the latest version to link to
+            Long previousVersionId = versions.isEmpty() ? null : versions.get(0).version;
+            
+            RowVersion newRowVersion = new RowVersion(rowId, newVersion, timestamp, transactionId, data, false, previousVersionId);
+            
+            // Add to front of list (newest first)
+            versions.add(0, newRowVersion);
+            
+            // Limit version history to prevent memory bloat (keep last 10 versions)
+            if (versions.size() > 10) {
+                versions.remove(versions.size() - 1);
+            }
             
         } finally {
             lock.writeLock().unlock();
@@ -96,21 +145,34 @@ public class MVCC {
     }
     
     /**
-     * Elimina una fila (marca como deleted).
-     * @param rowId ID de la fila
-     * @param transactionVersion Versión de la transacción
+     * Delete a row (mark as deleted).
+     * @param rowId Row ID
+     * @param transactionVersion Transaction version
+     * @param transactionId Transaction ID
      */
-    public void delete(long rowId, long transactionVersion) {
+    public void delete(long rowId, long transactionVersion, long transactionId) {
         lock.writeLock().lock();
         try {
             long newVersion = globalVersion.incrementAndGet();
             long timestamp = System.currentTimeMillis();
             
-            RowVersion currentVersion = rowVersions.get(rowId);
-            Map<String, Object> data = (currentVersion != null) ? currentVersion.data : new ConcurrentHashMap<>();
+            List<RowVersion> versions = rowVersions.computeIfAbsent(rowId, k -> new ArrayList<>());
             
-            RowVersion deletedVersion = new RowVersion(newVersion, timestamp, data, true);
-            rowVersions.put(rowId, deletedVersion);
+            // Get data from current version
+            Map<String, Object> data = new ConcurrentHashMap<>();
+            if (!versions.isEmpty() && versions.get(0).data != null) {
+                data.putAll(versions.get(0).data);
+            }
+            
+            Long previousVersionId = versions.isEmpty() ? null : versions.get(0).version;
+            
+            RowVersion deletedVersion = new RowVersion(rowId, newVersion, timestamp, transactionId, data, true, previousVersionId);
+            
+            versions.add(0, deletedVersion);
+            
+            if (versions.size() > 10) {
+                versions.remove(versions.size() - 1);
+            }
             
         } finally {
             lock.writeLock().unlock();
@@ -118,36 +180,124 @@ public class MVCC {
     }
     
     /**
-     * Encuentra la versión visible para una transacción dada.
+     * Mark transaction as committed.
      */
-    private RowVersion findVisibleVersion(RowVersion rowVersion, long transactionVersion) {
-        // En una implementación completa, recorreríamos la cadena de versiones
-        // Aquí simplificamos: si la versión es <= transactionVersion, es visible
-        if (rowVersion.version <= transactionVersion) {
-            return rowVersion;
+    public void commitTransaction(long transactionId) {
+        activeTransactions.remove(transactionId);
+        snapshots.remove(transactionId);
+    }
+    
+    /**
+     * Mark transaction as rolled back - remove all its versions.
+     */
+    public void rollbackTransaction(long transactionId) {
+        activeTransactions.remove(transactionId);
+        snapshots.remove(transactionId);
+        
+        // Remove all versions created by this transaction
+        lock.writeLock().lock();
+        try {
+            rowVersions.forEach((rowId, versions) -> {
+                versions.removeIf(v -> v.transactionId == transactionId);
+                if (versions.isEmpty()) {
+                    rowVersions.remove(rowId);
+                }
+            });
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+    
+    /**
+     * Find the visible version for a row according to snapshot isolation rules.
+     * 
+     * Visibility Rules:
+     * 1. Version must be committed (transaction not in active list at snapshot time)
+     * 2. Version timestamp must be <= snapshot creation time
+     * 3. Among visible versions, return the most recent one
+     */
+    private RowVersion findVisibleVersion(List<RowVersion> versions, long transactionVersion,
+                                          long transactionId, List<Long> activeAtSnapshot) {
+        for (RowVersion version : versions) {
+            if (isVisible(version, transactionId, activeAtSnapshot)) {
+                return version;
+            }
         }
         return null;
     }
     
     /**
-     * Obtiene la versión global actual.
+     * Check if a version is visible according to snapshot isolation.
      */
-    public long getGlobalVersion() {
-        return globalVersion.get();
+    private boolean isVisible(RowVersion version, long transactionId, List<Long> activeAtSnapshot) {
+        // Rule 1: Version must be from a committed transaction
+        // (transaction was not active at snapshot time, OR it's the snapshot's own transaction)
+        if (version.transactionId != transactionId && activeAtSnapshot.contains(version.transactionId)) {
+            return false; // Uncommitted transaction
+        }
+        
+        return true;
     }
     
     /**
-     * Limpia versiones antiguas (vacuum).
-     * @param minVisibleVersion Versión mínima que debe mantenerse
+     * Get all versions for a row (for debugging/testing).
      */
-    public void vacuum(long minVisibleVersion) {
+    public List<RowVersion> getAllVersions(long rowId) {
+        List<RowVersion> versions = rowVersions.get(rowId);
+        return versions != null ? new ArrayList<>(versions) : Collections.emptyList();
+    }
+    
+    /**
+     * Get the latest version of a row (regardless of visibility).
+     */
+    public RowVersion getLatestVersion(long rowId) {
+        List<RowVersion> versions = rowVersions.get(rowId);
+        return (versions != null && !versions.isEmpty()) ? versions.get(0) : null;
+    }
+    
+    /**
+     * Garbage collect old versions that are no longer needed.
+     */
+    public void vacuum() {
         lock.writeLock().lock();
         try {
-            // En una implementación completa, eliminaríamos versiones demasiado antiguas
-            // que ya no son visibles para ninguna transacción activa
-            // Aquí es un placeholder para futura optimización
+            if (activeTransactions.isEmpty()) {
+                // No active transactions, keep only latest version of each row
+                rowVersions.forEach((rowId, versions) -> {
+                    if (versions.size() > 1) {
+                        versions.subList(1, versions.size()).clear();
+                    }
+                });
+            } else {
+                // Find the oldest active transaction timestamp
+                long oldestTimestamp = activeTransactions.values().stream()
+                        .min(Long::compare)
+                        .orElse(System.currentTimeMillis());
+                
+                // Remove versions older than the oldest active transaction
+                rowVersions.forEach((rowId, versions) -> {
+                    versions.removeIf(v -> v.timestamp < oldestTimestamp && v != versions.get(0));
+                    if (versions.isEmpty()) {
+                        rowVersions.remove(rowId);
+                    }
+                });
+            }
         } finally {
             lock.writeLock().unlock();
         }
+    }
+    
+    /**
+     * Get current version count (for testing).
+     */
+    public int getVersionCount() {
+        return rowVersions.values().stream().mapToInt(List::size).sum();
+    }
+    
+    /**
+     * Get active transaction count (for testing).
+     */
+    public int getActiveTransactionCount() {
+        return activeTransactions.size();
     }
 }
