@@ -324,6 +324,10 @@ public class ColumnStore {
         private boolean compressed = false;
         private int uncompressedSize = 0; // Tamaño antes de compresión
         
+        // Cache de offsets para acceso O(1) - mapea posición -> offset en el buffer
+        private final Map<Integer, Integer> offsetCache = new HashMap<>();
+        private boolean cacheValid = true;
+        
         public ColumnBlock(DataType dataType, PageManager pageManager) {
             this.dataType = dataType;
             this.pageManager = pageManager;
@@ -415,6 +419,9 @@ public class ColumnStore {
                 currentOffset = dataEnd;
                 size++;
                 
+                // Invalidar cache ya que agregamos una nueva entrada
+                cacheValid = false;
+                
                 // Actualizar rowCount
                 updateRowCount();
             }
@@ -429,7 +436,15 @@ public class ColumnStore {
         
         public Object get(int position) {
             synchronized (this) {
-                // Leer rowCount del header
+                // Si la cache es válida y tenemos el offset, acceso O(1)
+                if (cacheValid && offsetCache.containsKey(position)) {
+                    ByteBuffer buffer = page.getByteBuffer();
+                    buffer.position(offsetCache.get(position));
+                    int dataLength = buffer.getInt();
+                    return PrimitiveSerializer.read(buffer, dataType);
+                }
+                
+                // Cache miss o inválida - escaneo lineal con reconstrucción de cache
                 ByteBuffer buffer = page.getByteBuffer();
                 buffer.position(Page.PAGE_HEADER_SIZE);
                 int rowCount = buffer.getInt();
@@ -442,8 +457,18 @@ public class ColumnStore {
                 int dataStart = Page.PAGE_HEADER_SIZE + 8;
                 buffer.position(dataStart);
                 
+                // Reconstruir cache mientras navegamos
+                if (cacheValid) {
+                    offsetCache.clear();
+                }
+                
                 // Navegar hasta la posición deseada leyendo longitudes secuencialmente
                 for (int i = 0; i <= position; i++) {
+                    // Guardar offset del length prefix en la cache
+                    if (cacheValid) {
+                        offsetCache.put(i, buffer.position());
+                    }
+                    
                     int dataLength = buffer.getInt();
                     if (i == position) {
                         // Leer el valor en la posición actual
@@ -497,6 +522,9 @@ public class ColumnStore {
                     PrimitiveSerializer.write(buffer, newValue, dataType);
                     // Actualizar longitud si es menor
                     buffer.putInt(dataOffsetStart, newLength);
+                    
+                    // Invalidar cache porque los offsets pueden haber cambiado
+                    cacheValid = false;
                 } else {
                     // Nuevo valor es más grande - requeriría reescritura completa del bloque
                     // Permitimos reescritura si el nuevo valor cabe en la página
@@ -504,6 +532,7 @@ public class ColumnStore {
                     if (newLength < maxAllowedSize) {
                         // Reescribir todo el bloque con el nuevo valor
                         rewriteBlockWithNewValue(position, newValue);
+                        // La reescritura ya invalida la cache internamente
                     } else {
                         throw new IllegalStateException("Cannot update to larger value without defragmentation");
                     }
@@ -550,6 +579,8 @@ public class ColumnStore {
             buffer.clear();
             currentOffset = Page.PAGE_HEADER_SIZE + 8; // Saltar rowCount + flags
             size = 0;
+            offsetCache.clear(); // Limpiar cache
+            cacheValid = true;   // La cache ahora es válida pero vacía
             writeRowCount(); // Escribir rowCount inicial en 0
             
             // Re-escribir todos los valores
