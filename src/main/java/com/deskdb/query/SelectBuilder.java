@@ -44,6 +44,10 @@ public class SelectBuilder {
         return new FilterBuilder(this, column);
     }
 
+    public FilterBuilder and(String column) {
+        return new FilterBuilder(this, column);
+    }
+
     public SelectBuilder addFilter(Filter filter) {
         this.filters.add(filter);
         return this;
@@ -193,6 +197,11 @@ public class SelectBuilder {
             parent.addFilter(new Filter(column, Filter.Operator.LTE, value));
             return parent;
         }
+
+        public SelectBuilder isEqualTo(Object value) {
+            parent.addFilter(new Filter(column, Filter.Operator.EQ, value));
+            return parent;
+        }
     }
     
     // Clase WhereCondition para compatibilidad con TableOperations
@@ -238,6 +247,15 @@ public class SelectBuilder {
         public SelectBuilder eq(Object value) {
             builder.addFilter(new Filter(column, Filter.Operator.EQ, value));
             return builder;
+        }
+        
+        public SelectBuilder isEqualTo(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.EQ, value));
+            return builder;
+        }
+        
+        public WhereCondition andWhere(String column) {
+            return new WhereCondition(column, builder);
         }
     }
 }

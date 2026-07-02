@@ -105,5 +105,10 @@ public class UpdateBuilder {
             parent.filter = new Filter(column, Filter.Operator.LTE, value);
             return parent;
         }
+
+        public UpdateBuilder isEqualTo(Object value) {
+            parent.filter = new Filter(column, Filter.Operator.EQ, value);
+            return parent;
+        }
     }
 }
