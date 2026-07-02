@@ -2,7 +2,6 @@ package com.deskdb.storage;
 
 import com.deskdb.core.DataType;
 import com.deskdb.core.Column;
-import com.deskdb.core.storage.compression.ColumnDictionary;
 
 import java.nio.ByteBuffer;
 import java.util.*;
@@ -10,7 +9,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * Almacenamiento columnar que organiza los datos por columnas en lugar de filas.
- * Permite lecturas parciales eficientes y compresión por columna.
+ * Permite lecturas parciales eficientes.
  */
 public class ColumnStore {
     private final String tableName;
@@ -20,9 +19,6 @@ public class ColumnStore {
     
     // Por columna: lista de bloques de datos (cada bloque es una página o fragmento)
     private final Map<String, List<ColumnBlock>> columnData;
-    
-    // Por columna: diccionarios para encoding (solo para columnas con baja cardinalidad)
-    private final Map<String, ColumnDictionary> columnDictionaries;
     
     // Mapeo rowId -> posición en cada columna
     private final Map<Long, Map<String, Integer>> rowPositions;
@@ -37,17 +33,12 @@ public class ColumnStore {
         this.columnNames = new ArrayList<>();
         this.columnTypes = new LinkedHashMap<>();
         this.columnData = new HashMap<>();
-        this.columnDictionaries = new HashMap<>();
         this.rowPositions = new HashMap<>();
         
         for (Column col : schema) {
             columnNames.add(col.getName());
             columnTypes.put(col.getName(), col.getType());
             columnData.put(col.getName(), new ArrayList<>());
-            // No inicializar diccionarios temporalmente hasta fixear decoding
-            // if (col.getType() == DataType.STRING || col.getType() == DataType.JSON) {
-            //     columnDictionaries.put(col.getName(), new ColumnDictionary(col.getName()));
-            // }
         }
     }
     
@@ -74,20 +65,7 @@ public class ColumnStore {
                     blocks.add(lastBlock);
                 }
                 
-                // Aplicar dictionary encoding si está disponible para esta columna y el valor es String
-                ColumnDictionary dict = columnDictionaries.get(colName);
-                Object valueToStore = value;
-                DataType typeToStore = columnTypes.get(colName);
-                
-                if (dict != null && value instanceof String) {
-                    // Guardar el ID del diccionario en lugar del string completo
-                    int dictId = dict.putOrGet((String) value);
-                    valueToStore = dictId;
-                    // El tipo almacenado es INT (el ID del diccionario)
-                    typeToStore = DataType.INT;
-                }
-                
-                int position = lastBlock.append(valueToStore, typeToStore);
+                int position = lastBlock.append(value, columnTypes.get(colName));
                 positions.put(colName, position);
             }
             
@@ -125,21 +103,7 @@ public class ColumnStore {
             int cumulative = 0;
             for (ColumnBlock block : blocks) {
                 if (position < cumulative + block.size()) {
-                    Object value = block.get(position - cumulative);
-                    
-                    // Si hay diccionario para esta columna, el valor almacenado es un ID (Integer)
-                    // Debemos decodificarlo al valor original String
-                    ColumnDictionary dict = columnDictionaries.get(columnName);
-                    if (dict != null && value instanceof Integer) {
-                        try {
-                            return dict.get((Integer) value);
-                        } catch (IllegalArgumentException e) {
-                            // Si el ID no es válido, retornar null o el valor original
-                            return null;
-                        }
-                    }
-                    
-                    return value;
+                    return block.get(position - cumulative);
                 }
                 cumulative += block.size();
             }
