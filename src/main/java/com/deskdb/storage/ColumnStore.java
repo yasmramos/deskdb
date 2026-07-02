@@ -499,10 +499,9 @@ public class ColumnStore {
                     buffer.putInt(dataOffsetStart, newLength);
                 } else {
                     // Nuevo valor es más grande - requeriría reescritura completa del bloque
-                    // Por simplicidad, lanzamos excepción (en producción se haría defragmentación)
-                    // EXCEPCIÓN: Para STRING y otros tipos variables, permitimos updates si no exceden PAGE_SIZE
-                    if ((dataType == DataType.STRING || dataType == DataType.DECIMAL || dataType == DataType.BLOB) 
-                        && newLength < Page.PAGE_SIZE - Page.PAGE_HEADER_SIZE - 16) {
+                    // Permitimos reescritura si el nuevo valor cabe en la página
+                    int maxAllowedSize = Page.PAGE_SIZE - Page.PAGE_HEADER_SIZE - 16;
+                    if (newLength < maxAllowedSize) {
                         // Reescribir todo el bloque con el nuevo valor
                         rewriteBlockWithNewValue(position, newValue);
                     } else {
