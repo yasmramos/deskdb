@@ -440,14 +440,14 @@ public class QueryEngineIntegrationTest {
         void testSelectWithNEOperator() throws Exception {
             List<Row> results = db.table("products")
                 .select()
-                .where("category").ne("Electronics")
+                .where("category").ne("Books")
                 .execute();
             
             assertFalse(results.isEmpty(), "Should return results");
             
             for (Row row : results) {
-                assertNotEquals("Electronics", row.get("category"), 
-                    "Should not be Electronics");
+                assertNotEquals("Books", row.get("category"), 
+                    "Should not be Books");
             }
         }
         
@@ -602,7 +602,7 @@ public class QueryEngineIntegrationTest {
         @DisplayName("Test andWhere() with multiple conditions using EQ")
         void testAndWhereWithMultipleEqualConditions() throws Exception {
             // Test the WhereCondition.andWhere() method which was not covered
-            SelectBuilder.WhereCondition whereCondition = db.table("products").where("category").eq("Electronics");
+            SelectBuilder.WhereCondition whereCondition = db.table("products").whereCond("category").eqCond("Electronics");
             
             // Use andWhere to add another condition
             List<Row> results = whereCondition
@@ -621,12 +621,12 @@ public class QueryEngineIntegrationTest {
         @DisplayName("Test andWhere() with mixed operators")
         void testAndWhereWithMixedOperators() throws Exception {
             // Test chaining multiple andWhere calls
-            SelectBuilder.WhereCondition whereCondition = db.table("products").where("price").gt(50.0);
+            SelectBuilder.WhereCondition whereCondition = db.table("products").whereCond("price").gtCond(50.0);
             
             List<Row> results = whereCondition
-                .andWhere("quantity")
+                .andCond("quantity")
                 .lt(100)
-                .andWhere("active")
+                .andCond("active")
                 .isEqualTo(true)
                 .execute();
             
@@ -645,12 +645,12 @@ public class QueryEngineIntegrationTest {
         @Test
         @DisplayName("Test andWhere() with BETWEEN operator")
         void testAndWhereWithBetweenOperator() throws Exception {
-            SelectBuilder.WhereCondition whereCondition = db.table("products").where("price").gte(100.0);
+            SelectBuilder.WhereCondition whereCondition = db.table("products").whereCond("price").gteCond(100.0);
             
             List<Row> results = whereCondition
-                .andWhere("price")
+                .andCond("price")
                 .lte(500.0)
-                .andWhere("quantity")
+                .andCond("quantity")
                 .gte(50)
                 .execute();
             
@@ -667,27 +667,27 @@ public class QueryEngineIntegrationTest {
         @Test
         @DisplayName("Test andWhere() with NE (Not Equal) operator")
         void testAndWhereWithNotEqualOperator() throws Exception {
-            SelectBuilder.WhereCondition whereCondition = db.table("products").where("category").ne("Electronics");
+            SelectBuilder.WhereCondition whereCondition = db.table("products").whereCond("category").neCond("Books");
             
             List<Row> results = whereCondition
-                .andWhere("active")
-                .ne(false)
+                .andCond("active")
+                .eq(true)
                 .execute();
             
-            assertFalse(results.isEmpty(), "Should return non-Electronics active products");
+            assertFalse(results.isEmpty(), "Should return active non-Books products");
             for (Row row : results) {
-                assertNotEquals("Electronics", row.get("category"));
-                assertNotEquals(false, row.get("active"));
+                assertNotEquals("Books", row.get("category"));
+                assertEquals(true, row.get("active"));
             }
         }
         
         @Test
         @DisplayName("Test andWhere() returning no results")
         void testAndWhereWithNoMatchingResults() throws Exception {
-            SelectBuilder.WhereCondition whereCondition = db.table("products").where("price").gt(1000.0);
+            SelectBuilder.WhereCondition whereCondition = db.table("products").whereCond("price").gtCond(1000.0);
             
             List<Row> results = whereCondition
-                .andWhere("quantity")
+                .andCond("quantity")
                 .lt(10)
                 .execute();
             
@@ -698,14 +698,14 @@ public class QueryEngineIntegrationTest {
         @DisplayName("Test complex query with 4+ conditions using andWhere")
         void testComplexQueryWithMultipleAndWhere() throws Exception {
             SelectBuilder.WhereCondition whereCondition = db.table("products")
-                .where("active").eq(true);
+                .whereCond("active").eqCond(true);
             
             List<Row> results = whereCondition
-                .andWhere("category")
+                .andCond("category")
                 .eq("Electronics")
-                .andWhere("price")
+                .andCond("price")
                 .lt(500.0)
-                .andWhere("quantity")
+                .andCond("quantity")
                 .gt(100)
                 .execute();
             
