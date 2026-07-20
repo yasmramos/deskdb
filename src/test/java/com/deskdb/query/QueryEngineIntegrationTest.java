@@ -52,6 +52,8 @@ public class QueryEngineIntegrationTest {
         insertProduct(8L, "Webcam", 59.99, 80, "Electronics", false);
         insertProduct(9L, "Bookshelf", 129.99, 20, "Furniture", true);
         insertProduct(10L, "Lamp", 39.99, 60, "Furniture", true);
+        insertProduct(11L, "Clean Code", 45.99, 100, "Books", true);
+        insertProduct(12L, "Design Patterns", 54.99, 75, "Books", false);
     }
     
     private void insertProduct(Long id, String name, Double price, 
