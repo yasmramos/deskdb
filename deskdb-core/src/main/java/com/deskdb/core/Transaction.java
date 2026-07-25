@@ -104,7 +104,6 @@ public class Transaction implements AutoCloseable {
                     
                     // Escribir COMMIT en WAL
                     wal.writeCommit(transactionId);
-                    wal.writeCheckpoint(transactionId);
                 } catch (IOException e) {
                     logger.error("Failed to write to WAL during commit: {}", e.getMessage());
                     throw new RuntimeException("WAL write failed", e);
@@ -271,11 +270,6 @@ public class Transaction implements AutoCloseable {
                     throw new IOException("Deserialization failed", e);
                 }
             }
-        }
-        
-        // Truncar WAL después de recuperación exitosa
-        try (Wal wal = Wal.open(walPath)) {
-            wal.truncate();
         }
         
         logger.info("Recovery completed successfully");

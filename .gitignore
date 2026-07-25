@@ -1,4 +1,4 @@
-```
+```gitignore
 # Compiled and build artifacts
 *.class
 *.o
@@ -17,101 +17,73 @@ deps/
 *.tmp
 *.swp
 
-# Editors
-.vscode/
-.idea/
-*.iml
-*.ipr
-*.iws
-
 # Environment
 .env
 .env.local
 *.env.*
 
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
 # Coverage
-.coverage
 coverage/
 htmlcov/
+.coverage
 
-# Package manager
+# Python specific (if applicable)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg-info/
+.eggs/
+.mypy_cache/
+.pytest_cache/
+.tox/
+.coverage*
+
+# Node.js specific (if applicable)
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+.npm
+.nyc_output
+coverage/
+*.lcov
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-pip-log.txt
-pip-delete-this-directory.txt
-.tox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.log
-.git/
-
-# Java
-*.class
+# Java specific
 *.jar
 *.war
 *.ear
 hs_err_pid*
-replay_pid*
 
-# Maven
-target/
-!target/README
-pom.xml.tag
-pom.xml.releaseBackup
-pom.xml.versionsBackup
-pom.xml.next
-release.properties
-dependency-reduced-pom.xml
-buildNumber.properties
-.mvn/timing.properties
-
-# Gradle
-.gradle/
-build/
-!build/README
-.settings/
-.loadpath
-.project
-.externalToolBuilders/
-*.launch
-.cproject
-.ide/
-bin/
-gen/
-out/
-*.dex
-*.apk
-*.aab
-*.aar
-
-# IntelliJ IDEA
-.idea/
-*.iml
-*.ipr
-*.iws
-*.jar
-*.class
-*.pyc
-*.pyo
-*.exe
-*.dll
-*.so
-*.dylib
-*.nib
-*~
-.DS_Store
-Thumbs.db
+# Compression
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
 ```

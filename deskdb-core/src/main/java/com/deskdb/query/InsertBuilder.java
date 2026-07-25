@@ -49,7 +49,11 @@ public class InsertBuilder {
         if (transactionToUse != null) {
             transactionToUse.applyChange(tableName, 0, row);
         } else if (table != null) {
-            table.insert(row);
+            // Auto-commit: crear transacción implícita para garantizar persistencia
+            try (Transaction autoTx = table.getDb().beginTransaction()) {
+                autoTx.applyChange(table.getName(), 0, row);
+                autoTx.commit();
+            }
         } else {
             throw new IllegalStateException("No table or transaction available for insert");
         }
