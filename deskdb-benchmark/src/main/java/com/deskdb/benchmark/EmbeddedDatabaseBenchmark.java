@@ -18,6 +18,8 @@ import java.util.concurrent.TimeUnit;
 import com.deskdb.core.DeskDB;
 import com.deskdb.core.Transaction;
 import com.deskdb.core.Row;
+import com.deskdb.core.Column;
+import com.deskdb.core.DataType;
 
 /**
  * Benchmark comparing DeskDB against popular embedded Java databases:
@@ -180,13 +182,13 @@ public class EmbeddedDatabaseBenchmark {
     
     // Setup DeskDB schema
     private void setupDeskDBSchema() throws Exception {
-        deskDB.table("users")
-            .column("id", int.class)
-            .column("name", String.class)
-            .column("email", String.class)
-            .column("age", int.class)
-            .column("balance", double.class)
-            .create();
+        deskDB.createTable("users",
+            new Column("id", DataType.LONG).primaryKey(),
+            new Column("name", DataType.STRING),
+            new Column("email", DataType.STRING),
+            new Column("age", DataType.INT),
+            new Column("balance", DataType.DOUBLE)
+        );
     }
 
     // Clear methods
