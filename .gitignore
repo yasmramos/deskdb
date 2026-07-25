@@ -3,19 +3,21 @@
 *.class
 *.o
 *.obj
+*.exe
+*.dll
+*.so
+*.a
 *.out
-build/
-target/
 
 # Dependencies
-.gradle/
-.mypy_cache/
-.pytest_cache/
-__pycache__/
 node_modules/
 venv/
 .venv/
-dist/
+__pycache__/
+.mypy_cache/
+.pytest_cache/
+target/
+.gradle/
 
 # Logs and temp files
 *.log
@@ -25,7 +27,7 @@ dist/
 # Environment
 .env
 .env.local
-*.env.*
+.env.*
 
 # Editors
 .vscode/
