@@ -44,6 +44,18 @@ public class SelectBuilder {
         return new FilterBuilder(this, column);
     }
 
+    public FilterBuilder and(String column) {
+        return new FilterBuilder(this, column);
+    }
+    
+    public WhereCondition whereCond(String column) {
+        return new WhereCondition(column, this);
+    }
+    
+    public WhereCondition andCond(String column) {
+        return new WhereCondition(column, this);
+    }
+
     public SelectBuilder addFilter(Filter filter) {
         this.filters.add(filter);
         return this;
@@ -91,10 +103,37 @@ public class SelectBuilder {
                 }
                 filteredResults.add(new Row(row.getRowId(), filteredValues));
             }
-            return filteredResults;
+            results = filteredResults;
         }
         
-        return results;
+        // Aplicar ORDER BY si se especificó
+        if (orderByColumn != null && !orderByColumn.isEmpty()) {
+            results.sort((r1, r2) -> {
+                Object v1 = r1.get(orderByColumn);
+                Object v2 = r2.get(orderByColumn);
+                if (v1 == null && v2 == null) return 0;
+                if (v1 == null) return -1;
+                if (v2 == null) return 1;
+                
+                int cmp;
+                if (v1 instanceof Comparable && v2 instanceof Comparable) {
+                    cmp = ((Comparable) v1).compareTo((Comparable) v2);
+                } else {
+                    cmp = v1.toString().compareTo(v2.toString());
+                }
+                return orderByAsc ? cmp : -cmp;
+            });
+        }
+        
+        // Aplicar OFFSET y LIMIT
+        int start = Math.max(0, offset);
+        int end = limit < 0 ? results.size() : Math.min(results.size(), start + limit);
+        
+        if (start > results.size()) {
+            return new ArrayList<>();
+        }
+        
+        return results.subList(start, end);
     }
 
     // Clase interna para construir filtros
@@ -138,6 +177,36 @@ public class SelectBuilder {
         }
 
         public SelectBuilder eq(Object value) {
+            parent.addFilter(new Filter(column, Filter.Operator.EQ, value));
+            return parent;
+        }
+
+        public SelectBuilder ne(Object value) {
+            parent.addFilter(new Filter(column, Filter.Operator.NE, value));
+            return parent;
+        }
+
+        public SelectBuilder gt(Object value) {
+            parent.addFilter(new Filter(column, Filter.Operator.GT, value));
+            return parent;
+        }
+
+        public SelectBuilder gte(Object value) {
+            parent.addFilter(new Filter(column, Filter.Operator.GTE, value));
+            return parent;
+        }
+
+        public SelectBuilder lt(Object value) {
+            parent.addFilter(new Filter(column, Filter.Operator.LT, value));
+            return parent;
+        }
+
+        public SelectBuilder lte(Object value) {
+            parent.addFilter(new Filter(column, Filter.Operator.LTE, value));
+            return parent;
+        }
+
+        public SelectBuilder isEqualTo(Object value) {
             parent.addFilter(new Filter(column, Filter.Operator.EQ, value));
             return parent;
         }
@@ -186,6 +255,94 @@ public class SelectBuilder {
         public SelectBuilder eq(Object value) {
             builder.addFilter(new Filter(column, Filter.Operator.EQ, value));
             return builder;
+        }
+        
+        public WhereCondition eqCond(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.EQ, value));
+            return this;
+        }
+        
+        public WhereCondition gtCond(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.GT, value));
+            return this;
+        }
+        
+        public WhereCondition gteCond(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.GTE, value));
+            return this;
+        }
+        
+        public WhereCondition ltCond(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.LT, value));
+            return this;
+        }
+        
+        public WhereCondition lteCond(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.LTE, value));
+            return this;
+        }
+        
+        public WhereCondition neCond(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.NE, value));
+            return this;
+        }
+        
+        public SelectBuilder isEqualTo(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.EQ, value));
+            return builder;
+        }
+        
+        public SelectBuilder ne(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.NE, value));
+            return builder;
+        }
+        
+        public SelectBuilder gt(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.GT, value));
+            return builder;
+        }
+        
+        public SelectBuilder gte(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.GTE, value));
+            return builder;
+        }
+        
+        public SelectBuilder lt(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.LT, value));
+            return builder;
+        }
+        
+        public SelectBuilder lte(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.LTE, value));
+            return builder;
+        }
+        
+        public WhereCondition and(String column) {
+            return new WhereCondition(column, builder);
+        }
+        
+        public WhereCondition andCond(String column) {
+            return new WhereCondition(column, builder);
+        }
+        
+        public WhereCondition andWhere(String column) {
+            return new WhereCondition(column, builder);
+        }
+        
+        public SelectBuilder limit(int limit) {
+            return builder.limit(limit);
+        }
+        
+        public SelectBuilder offset(int offset) {
+            return builder.offset(offset);
+        }
+        
+        public SelectBuilder orderBy(String column) {
+            return builder.orderBy(column);
+        }
+        
+        public SelectBuilder orderByDesc(String column) {
+            return builder.orderByDesc(column);
         }
     }
 }

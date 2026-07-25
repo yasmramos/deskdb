@@ -1,6 +1,8 @@
 package com.deskdb.core;
 
 import com.deskdb.index.BTree;
+import com.deskdb.mapping.EntityManager;
+import com.deskdb.storage.Wal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,6 +31,7 @@ public class DeskDB implements AutoCloseable {
     private final Map<String, Table> tables;
     private final Map<String, TableSchema> schemas;
     private final Map<String, Map<String, BTree<?, ?>>> indexes; // tableName -> indexName -> BTree
+    private Wal wal;
     private boolean closed = false;
 
     private DeskDB(Path dbPath) throws IOException {
@@ -37,8 +40,18 @@ public class DeskDB implements AutoCloseable {
         this.schemas = new HashMap<>();
         this.indexes = new ConcurrentHashMap<>();
         
+        // Determinar ruta del WAL (mismo directorio que el archivo .deskdb)
+        Path walPath = dbPath.resolveSibling(dbPath.getFileName().toString() + ".wal");
+        
         if (Files.exists(dbPath)) {
             loadFromFile();
+            
+            // Recuperar desde WAL si existe
+            try {
+                Transaction.recover(this, walPath);
+            } catch (Exception e) {
+                logger.warn("Recovery failed: {}", e.getMessage());
+            }
         } else {
             // Crear directorio padre si no existe
             if (dbPath.getParent() != null) {
@@ -47,7 +60,10 @@ public class DeskDB implements AutoCloseable {
             saveToFile();
         }
         
-        logger.info("DeskDB opened at {}", dbPath.toAbsolutePath());
+        // Inicializar WAL
+        this.wal = Wal.open(walPath);
+        
+        logger.info("DeskDB opened at {} with WAL at {}", dbPath.toAbsolutePath(), walPath.toAbsolutePath());
     }
 
     /**
@@ -96,7 +112,7 @@ public class DeskDB implements AutoCloseable {
     /**
      * Obtiene una tabla por nombre para realizar operaciones dentro de una transacción.
      */
-    TableOperations table(String tableName, Transaction transaction) {
+    public TableOperations table(String tableName, Transaction transaction) {
         checkClosed();
         return new TableOperations(this, tableName, transaction);
     }
@@ -156,10 +172,22 @@ public class DeskDB implements AutoCloseable {
      */
     public void close() throws IOException {
         if (!closed) {
+            // Cerrar WAL antes de guardar
+            if (wal != null) {
+                wal.close();
+            }
             saveToFile();
             closed = true;
             logger.info("DeskDB closed at {}", dbPath.toAbsolutePath());
         }
+    }
+    
+    /**
+     * Obtiene el WAL de la base de datos.
+     * @return El WAL instance
+     */
+    public Wal getWal() {
+        return wal;
     }
 
     /**
@@ -202,6 +230,23 @@ public class DeskDB implements AutoCloseable {
 
     /**
      * Creates a BTree index on a specific column.
+     */
+    public <K extends Comparable<K>> void createIndex(String tableName, String indexName, String columnName) throws IOException {
+        createIndex(tableName, indexName, columnName, false);
+    }
+
+    /**
+     * Creates an EntityManager for ORM operations.
+     * 
+     * @return EntityManager instance for entity operations
+     */
+    public EntityManager createEntityManager() {
+        checkClosed();
+        return new EntityManager(this);
+    }
+
+    /**
+     * Creates an index on a column (single column).
      */
     @SuppressWarnings("unchecked")
     public <K extends Comparable<K>> void createIndex(String tableName, String indexName, String columnName) throws IOException {

@@ -1,10 +1,9 @@
-# Compiled and build artifacts
-*.class
-*.o
-*.obj
-*.out
-build/
+# Java/Maven build artifacts
 target/
+*.class
+*.jar
+*.war
+*.ear
 
 # Dependencies
 .gradle/
@@ -15,26 +14,41 @@ node_modules/
 venv/
 .venv/
 
-# Logs and temp files
+# Test reports
+**/surefire-reports/
+*.exec
+
+# Maven status files
+**/maven-status/
+
+# IDE files
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# Logs
 *.log
 *.tmp
 *.swp
 *.swo
 
-# Environment
+# Temporary files
+*.tmp
+*.swp
+*~
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Environment files
 .env
 .env.local
 *.env.*
-
-# Editors
-.vscode/
-.idea/
 
 # Coverage
 coverage/
 htmlcov/
 .coverage
-
-# System files
-.DS_Store
-Thumbs.dbtarget/

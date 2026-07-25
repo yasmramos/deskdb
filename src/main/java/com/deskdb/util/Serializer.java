@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.*;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -50,6 +51,11 @@ public class Serializer {
             } else if (value instanceof Boolean) {
                 out.writeByte(5);
                 out.writeBoolean((Boolean) value);
+            } else if (value instanceof BigDecimal) {
+                out.writeByte(7);
+                byte[] decimalBytes = ((BigDecimal) value).toPlainString().getBytes(StandardCharsets.UTF_8);
+                out.writeInt(decimalBytes.length);
+                out.write(decimalBytes);
             } else {
                 // Fallback a serialización binaria para otros tipos
                 out.writeByte(6);
@@ -100,6 +106,12 @@ public class Serializer {
                 case 5: // BOOLEAN
                     value = in.readBoolean();
                     break;
+                case 7: // DECIMAL (BigDecimal)
+                    int decimalLen = in.readInt();
+                    byte[] decimalBytes = new byte[decimalLen];
+                    in.readFully(decimalBytes);
+                    value = new BigDecimal(new String(decimalBytes, StandardCharsets.UTF_8));
+                    break;
                 case 6: // OBJECT
                     int objLen = in.readInt();
                     byte[] objBytes = new byte[objLen];
@@ -144,6 +156,29 @@ public class Serializer {
         ByteArrayInputStream bais = new ByteArrayInputStream(data);
         ObjectInputStream ois = new ObjectInputStream(bais);
         T obj = (T) ois.readObject();
+        ois.close();
+        return obj;
+    }
+    
+    /**
+     * Serializa un Map<String, Object> a bytes.
+     */
+    public static byte[] serialize(Map<String, Object> data) throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ObjectOutputStream oos = new ObjectOutputStream(baos);
+        oos.writeObject(data);
+        oos.close();
+        return baos.toByteArray();
+    }
+    
+    /**
+     * Deserializa bytes a Map<String, Object>.
+     */
+    @SuppressWarnings("unchecked")
+    public static Map<String, Object> deserialize(byte[] data) throws IOException, ClassNotFoundException {
+        ByteArrayInputStream bais = new ByteArrayInputStream(data);
+        ObjectInputStream ois = new ObjectInputStream(bais);
+        Map<String, Object> obj = (Map<String, Object>) ois.readObject();
         ois.close();
         return obj;
     }

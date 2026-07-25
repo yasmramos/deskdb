@@ -79,4 +79,9 @@ public class TableOperations {
         SelectBuilder builder = new SelectBuilder(table);
         return builder.new WhereCondition(column, builder);
     }
+    
+    // Helper para WHERE directo con WhereCondition: db.table("x").whereCond("col").eq(val)
+    public SelectBuilder.WhereCondition whereCond(String column) {
+        return where(column);
+    }
 }

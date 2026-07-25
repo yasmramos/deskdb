@@ -31,6 +31,11 @@ public class UpdateBuilder {
         setValues.put(column, value);
         return this;
     }
+    
+    public UpdateBuilder set(Map<String, Object> values) {
+        setValues.putAll(values);
+        return this;
+    }
 
     public UpdateBuilder set(java.util.Map<String, Object> values) {
         setValues.putAll(values);
@@ -80,6 +85,11 @@ public class UpdateBuilder {
             parent.filter = new Filter(column, Filter.Operator.EQ, value);
             return parent;
         }
+        
+        public UpdateBuilder eq(Object value) {
+            parent.filter = new Filter(column, Filter.Operator.EQ, value);
+            return parent;
+        }
 
         public UpdateBuilder greaterThan(Object value) {
             parent.filter = new Filter(column, Filter.Operator.GT, value);
@@ -98,6 +108,11 @@ public class UpdateBuilder {
 
         public UpdateBuilder lessThanOrEqual(Object value) {
             parent.filter = new Filter(column, Filter.Operator.LTE, value);
+            return parent;
+        }
+
+        public UpdateBuilder isEqualTo(Object value) {
+            parent.filter = new Filter(column, Filter.Operator.EQ, value);
             return parent;
         }
     }

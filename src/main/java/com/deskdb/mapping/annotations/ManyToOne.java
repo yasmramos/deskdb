@@ -9,6 +9,16 @@ import java.lang.annotation.Target;
 @Retention(RetentionPolicy.RUNTIME)
 public @interface ManyToOne {
     /**
+     * The join column for this relationship.
+     */
+    JoinColumn[] joinColumn() default {};
+    
+    /**
+     * The target entity class.
+     */
+    Class<?> targetEntity() default void.class;
+    
+    /**
      * Whether to cascade persist operations.
      */
     boolean cascade() default true;

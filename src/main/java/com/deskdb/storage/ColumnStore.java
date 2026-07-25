@@ -9,7 +9,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * Almacenamiento columnar que organiza los datos por columnas en lugar de filas.
- * Permite lecturas parciales eficientes y compresión por columna.
+ * Permite lecturas parciales eficientes.
  */
 public class ColumnStore {
     private final String tableName;
@@ -25,6 +25,7 @@ public class ColumnStore {
     
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
     private int rowCount = 0;
+    private final Map<Long, Boolean> deletedRows = new HashMap<>();
     
     public ColumnStore(String tableName, List<Column> schema, PageManager pageManager) {
         this.tableName = tableName;
@@ -43,11 +44,14 @@ public class ColumnStore {
     
     /**
      * Inserta una fila en el almacenamiento columnar.
+     * @param values Valores a insertar
+     * @return El rowId asignado a la nueva fila
      */
     public long insert(Map<String, Object> values) {
         lock.writeLock().lock();
         try {
-            long rowId = rowCount++;
+            // Usar un contador interno consistente para rowIds
+            long rowId = rowCount;
             Map<String, Integer> positions = new HashMap<>();
             
             for (String colName : columnNames) {
@@ -61,11 +65,12 @@ public class ColumnStore {
                     blocks.add(lastBlock);
                 }
                 
-                int position = lastBlock.append(value);
+                int position = lastBlock.append(value, columnTypes.get(colName));
                 positions.put(colName, position);
             }
             
             rowPositions.put(rowId, positions);
+            rowCount++;
             return rowId;
         } finally {
             lock.writeLock().unlock();
@@ -191,8 +196,6 @@ public class ColumnStore {
         }
     }
     
-    private final Map<Long, Boolean> deletedRows = new HashMap<>();
-    
     /**
      * Elimina una fila (marca como eliminada, no compacta inmediatamente).
      */
@@ -252,6 +255,9 @@ public class ColumnStore {
         }
     }
     
+    /**
+     * Retorna el número de filas activas (no eliminadas).
+     */
     public int getRowCount() {
         lock.readLock().lock();
         try {
@@ -269,13 +275,22 @@ public class ColumnStore {
     /**
      * Bloque de datos para una columna.
      * Almacena valores del mismo tipo en un ByteBuffer contiguo.
+     * Usa formato de tamaño variable para soportar strings y tipos complejos.
+     * Soporta compresión opcional de datos.
      */
     private static class ColumnBlock {
         private final DataType dataType;
         private final PageManager pageManager;
         private final Page page;
         private int size = 0;
+        private int currentOffset; // Offset actual dentro de la página
         private static final int MAX_ENTRIES_PER_BLOCK = 1000;
+        private boolean compressed = false;
+        private int uncompressedSize = 0; // Tamaño antes de compresión
+        
+        // Cache de offsets para acceso O(1) - mapea posición -> offset en el buffer
+        private final Map<Integer, Integer> offsetCache = new HashMap<>();
+        private boolean cacheValid = true;
         
         public ColumnBlock(DataType dataType, PageManager pageManager) {
             this.dataType = dataType;
@@ -285,77 +300,281 @@ public class ColumnStore {
             } catch (java.io.IOException e) {
                 throw new RuntimeException("Failed to allocate page", e);
             }
+            // Inicializar offset después del header de página + metadata (rowCount + flags)
+            this.currentOffset = Page.PAGE_HEADER_SIZE + 8; // 4 bytes rowCount + 4 bytes flags
+            writeRowCount();
+            writeFlags();
+        }
+        
+        private void writeRowCount() {
+            ByteBuffer buffer = page.getByteBuffer();
+            buffer.position(Page.PAGE_HEADER_SIZE);
+            buffer.putInt(0); // rowCount inicial
+        }
+        
+        private void writeFlags() {
+            ByteBuffer buffer = page.getByteBuffer();
+            buffer.position(Page.PAGE_HEADER_SIZE + 4);
+            int flags = compressed ? 1 : 0;
+            buffer.putInt(flags);
+        }
+        
+        private void updateRowCount() {
+            ByteBuffer buffer = page.getByteBuffer();
+            buffer.position(Page.PAGE_HEADER_SIZE);
+            buffer.putInt(size); // actualizar rowCount
+        }
+        
+        private void updateFlags() {
+            ByteBuffer buffer = page.getByteBuffer();
+            buffer.position(Page.PAGE_HEADER_SIZE + 4);
+            int flags = compressed ? 1 : 0;
+            buffer.putInt(flags);
+        }
+        
+        public boolean isCompressed() {
+            return compressed;
+        }
+        
+        public void setCompressed(boolean compressed) {
+            this.compressed = compressed;
+            updateFlags();
         }
         
         public boolean isFull() {
-            int entrySize = getEntrySize(dataType);
-            int maxEntriesPerPage = (Page.PAGE_SIZE - Page.PAGE_HEADER_SIZE) / entrySize;
-            return size >= Math.min(MAX_ENTRIES_PER_BLOCK, maxEntriesPerPage);
+            // Verificar si hay espacio suficiente para otra entrada
+            // Estimación conservadora: tamaño máximo del tipo + overhead
+            int estimatedSize = getEstimatedEntrySize(dataType) + 4; // +4 para length prefix
+            return currentOffset + estimatedSize > Page.PAGE_SIZE || 
+                   size >= MAX_ENTRIES_PER_BLOCK;
         }
         
         public int size() {
             return size;
         }
         
-        public int append(Object value) {
+        public int append(Object value, DataType type) {
             int position = size;
             ByteBuffer buffer = page.getByteBuffer();
-            int offset = calculateOffset(position);
             
             synchronized (this) {
-                buffer.position(offset);
-                PrimitiveSerializer.write(buffer, value, dataType);
+                // Mover al offset actual
+                buffer.position(currentOffset);
+                
+                // Guardar posición inicial para la longitud
+                int lengthOffset = currentOffset;
+                buffer.putInt(0); // Placeholder para longitud
+                
+                // Escribir el valor (incluye null marker internamente)
+                int dataStart = buffer.position();
+                PrimitiveSerializer.write(buffer, value, type);
+                int dataEnd = buffer.position();
+                
+                // Calcular longitud de los datos serializados
+                int dataLength = dataEnd - dataStart;
+                
+                // Volver atrás y escribir la longitud real
+                buffer.putInt(lengthOffset, dataLength);
+                
+                // Reposicionar al final de los datos escritos
+                buffer.position(dataEnd);
+                
+                // Actualizar offset actual y tamaño
+                currentOffset = dataEnd;
                 size++;
+                
+                // Invalidar cache ya que agregamos una nueva entrada
+                cacheValid = false;
+                
+                // Actualizar rowCount
+                updateRowCount();
             }
             
             return position;
         }
         
+        @Deprecated
+        public int append(Object value) {
+            return append(value, this.dataType);
+        }
+        
         public Object get(int position) {
-            ByteBuffer buffer = page.getByteBuffer();
-            int offset = calculateOffset(position);
-            
             synchronized (this) {
-                buffer.position(offset);
-                return PrimitiveSerializer.read(buffer, dataType);
+                // Si la cache es válida y tenemos el offset, acceso O(1)
+                if (cacheValid && offsetCache.containsKey(position)) {
+                    ByteBuffer buffer = page.getByteBuffer();
+                    buffer.position(offsetCache.get(position));
+                    int dataLength = buffer.getInt();
+                    return PrimitiveSerializer.read(buffer, dataType);
+                }
+                
+                // Cache miss o inválida - escaneo lineal con reconstrucción de cache
+                ByteBuffer buffer = page.getByteBuffer();
+                buffer.position(Page.PAGE_HEADER_SIZE);
+                int rowCount = buffer.getInt();
+                
+                if (position >= rowCount || position < 0) {
+                    throw new IndexOutOfBoundsException("Position " + position + " >= size " + rowCount);
+                }
+                
+                // Los datos comienzan después del rowCount (4 bytes) + flags (4 bytes) = 8 bytes
+                int dataStart = Page.PAGE_HEADER_SIZE + 8;
+                buffer.position(dataStart);
+                
+                // Reconstruir cache mientras navegamos
+                if (cacheValid) {
+                    offsetCache.clear();
+                }
+                
+                // Navegar hasta la posición deseada leyendo longitudes secuencialmente
+                for (int i = 0; i <= position; i++) {
+                    // Guardar offset del length prefix en la cache
+                    if (cacheValid) {
+                        offsetCache.put(i, buffer.position());
+                    }
+                    
+                    int dataLength = buffer.getInt();
+                    if (i == position) {
+                        // Leer el valor en la posición actual
+                        return PrimitiveSerializer.read(buffer, dataType);
+                    }
+                    // Saltar este dato
+                    buffer.position(buffer.position() + dataLength);
+                }
+                
+                return null; // No debería llegar aquí
             }
         }
         
         public void set(int position, Object newValue) {
-            ByteBuffer buffer = page.getByteBuffer();
-            int offset = calculateOffset(position);
-            
             synchronized (this) {
-                buffer.position(offset);
-                PrimitiveSerializer.write(buffer, newValue, dataType);
+                // Para tipos de tamaño fijo, podemos hacer update in-place
+                // Para tipos variables, necesitamos reescribir (simplificación: solo soportamos mismo tamaño)
+                ByteBuffer buffer = page.getByteBuffer();
+                buffer.position(Page.PAGE_HEADER_SIZE);
+                int rowCount = buffer.getInt();
+                
+                if (position >= rowCount) {
+                    throw new IndexOutOfBoundsException("Position " + position + " >= size " + rowCount);
+                }
+                
+                // Los datos comienzan después del rowCount (4 bytes) + flags (4 bytes) = 8 bytes
+                int dataStart = Page.PAGE_HEADER_SIZE + 8;
+                buffer.position(dataStart);
+                
+                // Navegar hasta la posición deseada
+                int currentPos = 0;
+                while (currentPos < position) {
+                    int dataLength = buffer.getInt();
+                    buffer.position(buffer.position() + dataLength);
+                    currentPos++;
+                }
+                
+                // Leer longitud del dato existente
+                int dataOffsetStart = buffer.position();
+                int existingLength = buffer.getInt();
+                int dataStartPosition = buffer.position();
+                
+                // Calcular tamaño del nuevo valor
+                ByteBuffer tempBuffer = ByteBuffer.allocate(1024);
+                PrimitiveSerializer.write(tempBuffer, newValue, dataType);
+                int newLength = tempBuffer.position();
+                
+                if (newLength <= existingLength) {
+                    // Cabe en el mismo espacio - escribir directamente
+                    buffer.position(dataStartPosition);
+                    PrimitiveSerializer.write(buffer, newValue, dataType);
+                    // Actualizar longitud si es menor
+                    buffer.putInt(dataOffsetStart, newLength);
+                    
+                    // Invalidar cache porque los offsets pueden haber cambiado
+                    cacheValid = false;
+                } else {
+                    // Nuevo valor es más grande - requeriría reescritura completa del bloque
+                    // Permitimos reescritura si el nuevo valor cabe en la página
+                    int maxAllowedSize = Page.PAGE_SIZE - Page.PAGE_HEADER_SIZE - 16;
+                    if (newLength < maxAllowedSize) {
+                        // Reescribir todo el bloque con el nuevo valor
+                        rewriteBlockWithNewValue(position, newValue);
+                        // La reescritura ya invalida la cache internamente
+                    } else {
+                        throw new IllegalStateException("Cannot update to larger value without defragmentation");
+                    }
+                }
             }
         }
         
-        private int calculateOffset(int position) {
-            // Cada entrada tiene tamaño variable según el tipo
-            // Para simplificar, asumimos un tamaño máximo fijo por tipo
-            int entrySize = getEntrySize(dataType);
-            int maxEntriesPerPage = (Page.PAGE_SIZE - Page.PAGE_HEADER_SIZE) / entrySize;
-            
-            // Si la posición excede la capacidad de una página, necesitamos múltiples páginas
-            // Por simplicidad, lanzamos excepción si se excede (en producción usaríamos linked pages)
-            if (position >= maxEntriesPerPage) {
-                throw new IllegalStateException("Block full: position " + position + " exceeds max " + maxEntriesPerPage);
+        private void rewriteBlockWithNewValue(int position, Object newValue) {
+            // Leer todos los valores existentes ANTES de modificar el buffer
+            List<Object> values = new ArrayList<>();
+            for (int i = 0; i < size; i++) {
+                if (i == position) {
+                    values.add(newValue);
+                } else {
+                    // Usar get() que crea su propio contexto sincronizado
+                    // Necesitamos leer todos los valores antes de modificar el buffer
+                    ByteBuffer readBuffer = page.getByteBuffer();
+                    readBuffer.position(Page.PAGE_HEADER_SIZE);
+                    int rowCount = readBuffer.getInt();
+                    
+                    if (i >= rowCount) {
+                        values.add(null);
+                        continue;
+                    }
+                    
+                    // Los datos comienzan después del rowCount (4 bytes) + flags (4 bytes) = 8 bytes
+                    int dataStart = Page.PAGE_HEADER_SIZE + 8;
+                    readBuffer.position(dataStart);
+                    
+                    // Navegar hasta la posición deseada
+                    for (int j = 0; j <= i; j++) {
+                        int dataLength = readBuffer.getInt();
+                        if (j == i) {
+                            values.add(PrimitiveSerializer.read(readBuffer, dataType));
+                            break;
+                        }
+                        readBuffer.position(readBuffer.position() + dataLength);
+                    }
+                }
             }
             
-            return Page.PAGE_HEADER_SIZE + (position * entrySize);
+            // Reiniciar el bloque con los nuevos valores
+            ByteBuffer buffer = page.getByteBuffer();
+            buffer.clear();
+            currentOffset = Page.PAGE_HEADER_SIZE + 8; // Saltar rowCount + flags
+            size = 0;
+            offsetCache.clear(); // Limpiar cache
+            cacheValid = true;   // La cache ahora es válida pero vacía
+            writeRowCount(); // Escribir rowCount inicial en 0
+            
+            // Re-escribir todos los valores
+            for (Object value : values) {
+                buffer.position(currentOffset);
+                int lengthOffset = currentOffset;
+                buffer.putInt(0);
+                int dataStart = buffer.position();
+                PrimitiveSerializer.write(buffer, value, dataType);
+                int dataEnd = buffer.position();
+                int dataLength = dataEnd - dataStart;
+                buffer.putInt(lengthOffset, dataLength);
+                currentOffset = dataEnd;
+                size++;
+            }
+            updateRowCount();
         }
         
-        private int getEntrySize(DataType type) {
+        private int getEstimatedEntrySize(DataType type) {
+            // Estimación conservadora para verificación de espacio
             switch (type) {
-                case BOOLEAN: return 1;
-                case INT: return 4;
-                case LONG: return 8;
-                case DOUBLE: return 8;
-                case STRING: return 256; // Tamaño máximo estimado
-                case DATE: return 8;
-                case TIMESTAMP: return 12;
-                case BLOB: return 1024;
+                case BOOLEAN: return 2; // 1 null marker + 1 byte
+                case INT: return 5;     // 1 null marker + 4 bytes
+                case LONG: return 9;    // 1 null marker + 8 bytes
+                case DOUBLE: return 9;  // 1 null marker + 8 bytes
+                case STRING: return 260; // 1 null marker + 3 length + 256 max string
+                case DATE: return 9;    // 1 null marker + 8 bytes
+                case TIMESTAMP: return 9; // 1 null marker + 8 bytes
+                case BLOB: return 1028; // 1 null marker + 4 length + 1024 max blob
+                case DECIMAL: return 17; // 1 null marker + 16 bytes (BigDecimal serialized)
                 default: return 64;
             }
         }
