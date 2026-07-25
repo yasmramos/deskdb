@@ -31,6 +31,7 @@ public class Wal implements AutoCloseable {
     private final FileChannel channel;
     private long position = 0;
     private boolean closed = false;
+    private boolean needsForce = false; // Buffer para flush diferido
     
     /**
      * Tipos de operaciones registradas en el WAL
@@ -124,13 +125,11 @@ public class Wal implements AutoCloseable {
         
         long timestamp = System.currentTimeMillis();
         WalEntry entry = new WalEntry(timestamp, transactionId, operation, tableName, key, data);
-        
         ByteBuffer buffer = serializeEntry(entry);
-        
-        // Escribir en el WAL
         channel.position(position);
-        channel.write(buffer);
-        channel.force(false); // Forzar escritura al disco
+        channel.position(position);
+        // El flush real se hace en writeCommit (flush diferido)
+        needsForce = true;
         
         position += buffer.limit();
         
@@ -143,6 +142,11 @@ public class Wal implements AutoCloseable {
      */
     public synchronized void writeCommit(long transactionId) throws IOException {
         write(transactionId, OperationType.COMMIT, "", "", new byte[0]);
+        // Flush diferido: forzar todas las escrituras pendientes al disco
+        if (needsForce) {
+            channel.force(false);
+            needsForce = false;
+        }
     }
     
     /**
