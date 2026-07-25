@@ -139,6 +139,7 @@ public class DeskDB implements AutoCloseable {
         registerSchema(tableName, schema);
         
         Table table = new Table(tableName, List.of(columns), dbPath.toString());
+        table.setDb(this);
         tables.put(tableName, table);
         indexes.put(tableName, new ConcurrentHashMap<>());
         
@@ -366,6 +367,7 @@ public class DeskDB implements AutoCloseable {
                     
                     // Crear tabla
                     Table table = new Table(tableName, List.of(columns), dbPath.toString());
+                    table.setDb(this);
                     tables.put(tableName, table);
                 }
                 
