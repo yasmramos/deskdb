@@ -16,13 +16,14 @@ import java.util.concurrent.TimeUnit;
 @State(Scope.Thread)
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.SECONDS)
-@Warmup(iterations = 3, time = 5)
-@Measurement(iterations = 5, time = 10)
-@Fork(2)
+@Warmup(iterations = 2, time = 3)
+@Measurement(iterations = 3, time = 5)
+@Fork(1)
 public class CoreOperationsBenchmark {
 
     private DeskDB database;
     private TableOperations tableOps;
+    private int nextId = 1000; // Start from 1000 to avoid conflicts with preloaded data
 
     @Setup
     public void setup() throws Exception {
@@ -68,7 +69,7 @@ public class CoreOperationsBenchmark {
 
     @Benchmark
     public void insertOperation(Blackhole bh) throws Exception {
-        int id = (int) System.nanoTime();
+        int id = nextId++;
         tableOps.insert()
                 .value("id", id)
                 .value("name", "User" + id)
