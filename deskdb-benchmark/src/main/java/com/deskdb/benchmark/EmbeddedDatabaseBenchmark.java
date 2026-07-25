@@ -46,6 +46,19 @@ public class EmbeddedDatabaseBenchmark {
     
     // ID counter for unique inserts
     private int currentId = 1;
+    private final Object idLock = new Object();
+    
+    private int getNextId() {
+        synchronized (idLock) {
+            return currentId++;
+        }
+    }
+    
+    private void resetIdCounter() {
+        synchronized (idLock) {
+            currentId = 1;
+        }
+    }
     
     // Database instances
     private DeskDB deskDB;
@@ -114,6 +127,8 @@ public class EmbeddedDatabaseBenchmark {
         clearH2();
         clearSQLite();
         clearHSQLDB();
+        // Reset ID counter for unique inserts
+        resetIdCounter();
     }
     
     private void cleanupFiles() {
@@ -223,7 +238,7 @@ public class EmbeddedDatabaseBenchmark {
     @Benchmark
     public void insertSingle_DeskDB() {
         try {
-            int id = currentId++;
+            int id = getNextId();
             deskDB.table("users")
                 .insert()
                 .value("id", id)
@@ -280,11 +295,12 @@ public class EmbeddedDatabaseBenchmark {
     public void insertBatch_DeskDB() {
         try (Transaction tx = deskDB.beginTransaction()) {
             for (int i = 0; i < BATCH_SIZE; i++) {
+                int id = getNextId();
                 deskDB.table("users")
                     .insert()
-                    .value("id", i)
-                    .value("name", "User " + i)
-                    .value("email", "user" + i + "@example.com")
+                    .value("id", id)
+                    .value("name", "User " + id)
+                    .value("email", "user" + id + "@example.com")
                     .value("age", 20 + (i % 50))
                     .value("balance", 1000.0 + i * 1.5)
                     .execute();
