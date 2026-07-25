@@ -58,7 +58,7 @@ public class CoreOperationsBenchmark {
                 .value("email", "u@e.com")
                 .value("age", 25)
                 .value("balance", 100.0)
-                .addRow();
+                .execute(tx);
             tx.commit();
         }
         bh.consume(true);
@@ -67,7 +67,7 @@ public class CoreOperationsBenchmark {
     @Benchmark
     public void insertBatch_Throughput(Blackhole bh) throws Exception {
         try (Transaction tx = new Transaction(database, false)) {
-            for (int i = 0; i < 1000; i++) { database.table("users").insert()
+            for (int i = 0; i < 1000; i++) {
                 database.table("users")
                     .insert()
                     .value("id", counter.incrementAndGet())
@@ -75,7 +75,7 @@ public class CoreOperationsBenchmark {
                     .value("email", "u@e.com")
                     .value("age", 25)
                     .value("balance", 100.0)
-                    .addRow();
+                    .execute(tx);
             }
             tx.commit();
         }
