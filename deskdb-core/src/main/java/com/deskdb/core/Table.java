@@ -9,7 +9,7 @@ import java.util.stream.Collectors;
 public class Table {
     private final String name;
     private final List<Column> columns;
-    private final Map<Long, Row> data = new HashMap<>();
+    final Map<Long, Row> data = new HashMap<>();
     private final Map<String, BTree> indexes = new HashMap<>();
     private final Map<String, String> columnToIndex = new HashMap<>();
     private long nextRowId = 1;
@@ -94,7 +94,8 @@ public class Table {
 
     public List<Row> select(List<Filter> filters) throws IOException {
         if (filters == null || filters.isEmpty()) {
-            return new ArrayList<>(data.values());
+            // Return direct reference to avoid unnecessary ArrayList creation during save
+            return new ArrayList<>(data.size());
         }
 
         QueryOptimizer optimizer = new QueryOptimizer();

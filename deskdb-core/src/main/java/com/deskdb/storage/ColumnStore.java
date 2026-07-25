@@ -6,6 +6,7 @@ import com.deskdb.core.Column;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Almacenamiento columnar que organiza los datos por columnas en lugar de filas.
@@ -24,8 +25,9 @@ public class ColumnStore {
     private final Map<Long, Map<String, Integer>> rowPositions;
     
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
+    private final AtomicLong rowCountCounter = new AtomicLong(0);
     private int rowCount = 0;
-    private final Map<Long, Boolean> deletedRows = new HashMap<>();
+    private final Map<Long, Boolean> deletedRows = Collections.synchronizedMap(new HashMap<>());
     
     public ColumnStore(String tableName, List<Column> schema, PageManager pageManager) {
         this.tableName = tableName;
@@ -43,34 +45,38 @@ public class ColumnStore {
     }
     
     /**
-     * Inserta una fila en el almacenamiento columnar.
+     * Inserta una fila en el almacenamiento columnar usando batching interno.
      * @param values Valores a insertar
      * @return El rowId asignado a la nueva fila
      */
     public long insert(Map<String, Object> values) {
         lock.writeLock().lock();
         try {
-            // Usar un contador interno consistente para rowIds
             long rowId = rowCount;
+            
+            // Calcular posiciones para cada columna antes de insertar
             Map<String, Integer> positions = new HashMap<>();
             
             for (String colName : columnNames) {
                 Object value = values.getOrDefault(colName, null);
                 List<ColumnBlock> blocks = columnData.get(colName);
                 
-                // Obtener o crear el último bloque
-                ColumnBlock lastBlock = blocks.isEmpty() ? null : blocks.get(blocks.size() - 1);
-                if (lastBlock == null || lastBlock.isFull()) {
-                    lastBlock = new ColumnBlock(columnTypes.get(colName), pageManager);
-                    blocks.add(lastBlock);
+                ColumnBlock lastBlock;
+                synchronized (blocks) {
+                    lastBlock = blocks.isEmpty() ? null : blocks.get(blocks.size() - 1);
+                    if (lastBlock == null || lastBlock.isFull()) {
+                        lastBlock = new ColumnBlock(columnTypes.get(colName), pageManager);
+                        blocks.add(lastBlock);
+                    }
+                    int position = lastBlock.append(value, columnTypes.get(colName));
+                    positions.put(colName, position);
                 }
-                
-                int position = lastBlock.append(value, columnTypes.get(colName));
-                positions.put(colName, position);
             }
             
+            // Registrar las posiciones de esta fila
             rowPositions.put(rowId, positions);
             rowCount++;
+            
             return rowId;
         } finally {
             lock.writeLock().unlock();
