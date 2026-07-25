@@ -9,7 +9,7 @@ import java.util.stream.Collectors;
 public class Table {
     private final String name;
     private final List<Column> columns;
-    private final Map<Long, Row> data = new HashMap<>();
+    final Map<Long, Row> data = new HashMap<>();
     private final Map<String, BTree> indexes = new HashMap<>();
     private final Map<String, String> columnToIndex = new HashMap<>();
     private long nextRowId = 1;
