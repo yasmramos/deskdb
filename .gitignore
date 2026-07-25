@@ -1,54 +1,117 @@
-# Java/Maven build artifacts
-target/
+```
+# Compiled and build artifacts
 *.class
-*.jar
-*.war
-*.ear
+*.o
+*.obj
+*.out
+build/
+target/
 
 # Dependencies
 .gradle/
-.mypy_cache/
-.pytest_cache/
-__pycache__/
-node_modules/
-venv/
-.venv/
+lib/
+deps/
 
-# Test reports
-**/surefire-reports/
-*.exec
+# Logs and temp files
+*.log
+*.tmp
+*.swp
 
-# Maven status files
-**/maven-status/
-
-# IDE files
-.idea/
+# Editors
 .vscode/
+.idea/
 *.iml
 *.ipr
 *.iws
 
-# Logs
-*.log
-*.tmp
-*.swp
-*.swo
-
-# Temporary files
-*.tmp
-*.swp
-*~
-
-# OS generated files
-.DS_Store
-Thumbs.db
-
-# Environment files
+# Environment
 .env
 .env.local
 *.env.*
 
 # Coverage
+.coverage
 coverage/
 htmlcov/
+
+# Package manager
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
 .coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.git/
+
+# Java
+*.class
+*.jar
+*.war
+*.ear
+hs_err_pid*
+replay_pid*
+
+# Maven
+target/
+!target/README
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+
+# Gradle
+.gradle/
+build/
+!build/README
+.settings/
+.loadpath
+.project
+.externalToolBuilders/
+*.launch
+.cproject
+.ide/
+bin/
+gen/
+out/
+*.dex
+*.apk
+*.aab
+*.aar
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+*.jar
+*.class
+*.pyc
+*.pyo
+*.exe
+*.dll
+*.so
+*.dylib
+*.nib
+*~
+.DS_Store
+Thumbs.db
+```
