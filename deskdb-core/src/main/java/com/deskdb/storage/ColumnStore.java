@@ -43,7 +43,7 @@ public class ColumnStore {
     }
     
     /**
-     * Inserta una fila en el almacenamiento columnar.
+     * Inserta una fila en el almacenamiento columnar usando batching interno.
      * @param values Valores a insertar
      * @return El rowId asignado a la nueva fila
      */
@@ -52,7 +52,6 @@ public class ColumnStore {
         try {
             // Usar un contador interno consistente para rowIds
             long rowId = rowCount;
-            Map<String, Integer> positions = new HashMap<>();
             
             for (String colName : columnNames) {
                 Object value = values.getOrDefault(colName, null);
@@ -65,11 +64,9 @@ public class ColumnStore {
                     blocks.add(lastBlock);
                 }
                 
-                int position = lastBlock.append(value, columnTypes.get(colName));
-                positions.put(colName, position);
+                lastBlock.append(value, columnTypes.get(colName));
             }
             
-            rowPositions.put(rowId, positions);
             rowCount++;
             return rowId;
         } finally {
