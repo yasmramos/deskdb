@@ -74,7 +74,7 @@ public class CoreOperationsBenchmark {
     public void insertSingle_Durability(Blackhole bh) throws Exception {
         // Mide latencia real de un insert con commit durable (fsync por operación)
         // Este número DEBE ser bajo (~700-5k ops/s en SSD) debido al fsync
-        try (Transaction tx = database.beginTransaction()) {
+        try (Transaction tx = new Transaction(database, false)) {
             database.table("users")
                 .insert()
                 .value("id", counter.incrementAndGet())
@@ -92,7 +92,7 @@ public class CoreOperationsBenchmark {
     public void insertBatch_Throughput(Blackhole bh) throws Exception {
         // Mide throughput real agrupando 1000 inserts en un solo commit
         // Objetivo: >50k ops/s (50M rows/s efectivo)
-        try (Transaction tx = database.beginTransaction()) {
+        try (Transaction tx = new Transaction(database, false)) {
             for (int i = 0; i < 1000; i++) {
                 database.table("users")
                     .insert()
