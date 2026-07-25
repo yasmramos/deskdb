@@ -50,32 +50,30 @@ public class CoreOperationsBenchmark {
 
     @Benchmark
     public void insertSingle_Durability(Blackhole bh) throws Exception {
-        try (Transaction tx = new Transaction(database, false)) {
-            database.table("users")
-                .insert()
-                .value("id", counter.incrementAndGet())
-                .value("name", "User")
-                .value("email", "u@e.com")
-                .value("age", 25)
-                .value("balance", 100.0)
-                .execute(tx);
-            tx.commit();
-        }
+        int id = counter.incrementAndGet();
+        database.table("users")
+            .insert()
+            .value("id", id)
+            .value("name", "User")
+            .value("email", "u@e.com")
+            .value("age", 25)
+            .value("balance", 100.0)
+            .execute();
         bh.consume(true);
     }
 
     @Benchmark
     public void insertBatch_Throughput(Blackhole bh) throws Exception {
-        try (Transaction tx = new Transaction(database, false)) {
+        try (Transaction tx = database.beginTransaction()) {
             for (int i = 0; i < 1000; i++) {
-                database.table("users")
+                tx.table("users")
                     .insert()
                     .value("id", counter.incrementAndGet())
                     .value("name", "User")
                     .value("email", "u@e.com")
                     .value("age", 25)
                     .value("balance", 100.0)
-                    .execute(tx);
+                    .execute();
             }
             tx.commit();
         }
