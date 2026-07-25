@@ -75,7 +75,8 @@ public class CoreOperationsBenchmark {
                 .value("name", "User" + id)
                 .value("email", "user" + id + "@test.com")
                 .value("age", 25)
-                .execute();
+                .addRow()
+                .executeBatch();
         bh.consume(true);
     }
 
