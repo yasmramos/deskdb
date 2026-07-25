@@ -51,7 +51,18 @@ public class CoreOperationsBenchmark {
     @TearDown
     public void tearDown() throws Exception {
         if (database != null) {
-            database.close();
+            try {
+                database.close();
+            } catch (Exception e) {
+                // Ignorar errores en cleanup durante benchmark
+            }
+            // Eliminar archivo temporal
+            try {
+                java.nio.file.Files.deleteIfExists(java.nio.file.Paths.get(database.getFilePath()));
+                java.nio.file.Files.deleteIfExists(java.nio.file.Paths.get(database.getFilePath() + ".wal"));
+            } catch (Exception e) {
+                // Ignorar errores al eliminar archivos
+            }
         }
     }
 

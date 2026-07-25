@@ -34,6 +34,10 @@ public class DeskDB implements AutoCloseable {
     private Wal wal;
     private boolean closed = false;
 
+    public String getFilePath() {
+        return dbPath.toString();
+    }
+
     private DeskDB(Path dbPath) throws IOException {
         this.dbPath = dbPath;
         this.tables = new ConcurrentHashMap<>();
