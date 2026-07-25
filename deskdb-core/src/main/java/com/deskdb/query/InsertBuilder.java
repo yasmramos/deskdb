@@ -53,34 +53,21 @@ public class InsertBuilder {
     }
 
     /**
-     * Executes a single insert (legacy compatibility).
+     * Executes all accumulated rows in a single operation.
+     * Automatically handles both single and batch inserts efficiently.
      */
     public void execute() throws Exception {
         execute(null);
     }
     
     /**
-     * Executes a single insert with optional transaction (legacy compatibility).
+     * Executes all accumulated rows in a single operation with optional transaction.
+     * Automatically handles both single and batch inserts efficiently.
      */
     public void execute(Transaction tx) throws Exception {
         if (batchValues.isEmpty() && !currentValues.isEmpty()) {
             addRow();
         }
-        executeBatch(tx);
-    }
-
-    /**
-     * Executes all accumulated rows in a single batch operation.
-     * This is significantly faster than individual inserts for bulk operations.
-     */
-    public void executeBatch() throws Exception {
-        executeBatch(null);
-    }
-    
-    /**
-     * Executes all accumulated rows in a single batch operation with optional transaction.
-     */
-    public void executeBatch(Transaction tx) throws Exception {
         if (batchValues.isEmpty()) {
             return;
         }
