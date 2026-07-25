@@ -432,17 +432,17 @@ public class DeskDB implements AutoCloseable {
             ByteArrayOutputStream dataBaos = new ByteArrayOutputStream();
             DataOutputStream dataOut = new DataOutputStream(dataBaos);
             
-            // Guardar datos de cada tabla
+            // Guardar datos de cada tabla directamente del ConcurrentHashMap para evitar OOM
             for (Map.Entry<String, Table> entry : tables.entrySet()) {
                 Table table = entry.getValue();
-                List<Row> rows = table.select(null);
                 
                 // Escribir nombre de tabla
                 dataOut.writeUTF(entry.getKey());
-                dataOut.writeInt(rows.size());
+                dataOut.writeInt(table.data.size());
                 
-                // Escribir cada fila
-                for (Row row : rows) {
+                // Escribir cada fila directamente del mapa interno
+                for (Map.Entry<Long, Row> rowEntry : table.data.entrySet()) {
+                    Row row = rowEntry.getValue();
                     dataOut.writeLong(row.getRowId());
                     Map<String, Object> values = row.getValues();
                     dataOut.writeInt(values.size());
