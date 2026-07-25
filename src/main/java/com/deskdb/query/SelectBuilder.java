@@ -257,11 +257,6 @@ public class SelectBuilder {
             return builder;
         }
         
-        public SelectBuilder eq(Object value) {
-            builder.addFilter(new Filter(column, Filter.Operator.EQ, value));
-            return builder;
-        }
-        
         public WhereCondition eqCond(Object value) {
             builder.addFilter(new Filter(column, Filter.Operator.EQ, value));
             return this;

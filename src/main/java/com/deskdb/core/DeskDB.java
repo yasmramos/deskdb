@@ -303,7 +303,7 @@ public class DeskDB implements AutoCloseable {
                 }
                 
                 if (keyValue != null) {
-                    btree.insert(keyValue, row.getRowId());
+                    btree.insert((String) keyValue, row.getRowId());
                 }
             }
         }
