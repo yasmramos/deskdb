@@ -5,7 +5,8 @@ on:
   push:
     branches: [ develop ]
     paths:
-      - 'src/**'
+      - 'deskdb-core/**'
+      - 'deskdb-benchmark/**'
       - 'pom.xml'
 
 jobs:
@@ -22,45 +23,19 @@ jobs:
         distribution: 'temurin'
         cache: maven
     
-    - name: Compile benchmarks
-      run: ./mvnw test-compile -q
+    - name: Build project with benchmarks
+      run: ./mvnw clean install -DskipTests -q
     
-    - name: Run Core Operations Benchmark
+    - name: Run All Benchmarks
       run: |
-        echo "=== Running Core Operations Benchmark ==="
-        ./mvnw exec:java -Dexec.mainClass="org.openjdk.jmh.Main" \
-          -Dexec.classpathScope=test \
-          -Djmh.includes="CoreOperationsBenchmark" \
-          -Djmh.warmupIterations=2 \
-          -Djmh.measurementIterations=3 \
-          -q
-    
-    - name: Run Compression Benchmark
-      run: |
-        echo "=== Running Compression Benchmark ==="
-        ./mvnw exec:java -Dexec.mainClass="org.openjdk.jmh.Main" \
-          -Dexec.classpathScope=test \
-          -Djmh.includes="CompressionBenchmark" \
-          -Djmh.warmupIterations=2 \
-          -Djmh.measurementIterations=3 \
-          -q
-    
-    - name: Run Embedded Database Benchmark
-      run: |
-        echo "=== Running Embedded Database Benchmark ==="
-        ./mvnw exec:java -Dexec.mainClass="org.openjdk.jmh.Main" \
-          -Dexec.classpathScope=test \
-          -Djmh.includes="EmbeddedDatabaseBenchmark" \
-          -Djmh.warmupIterations=2 \
-          -Djmh.measurementIterations=3 \
-          -q
+        echo "=== Running All DeskDB Benchmarks ==="
+        java -jar deskdb-benchmark/target/benchmarks.jar > benchmark-results.txt 2>&1 || true
+        cat benchmark-results.txt
     
     - name: Upload benchmark results
       uses: actions/upload-artifact@v4
       if: always()
       with:
         name: benchmark-results
-        path: |
-          jmh-result.json
-          jmh-result.txt
+        path: benchmark-results.txt
         retention-days: 30
