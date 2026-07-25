@@ -219,6 +219,14 @@ public class DeskDB implements AutoCloseable {
     }
 
     /**
+     * Obtiene los datos internos de una tabla para operaciones de guardado.
+     * Package-private para evitar acceso externo pero permitir DeskDB guardar datos.
+     */
+    Map<Long, Row> getTableData(Table table) {
+        return table.data;
+    }
+
+    /**
      * Obtiene el esquema de una tabla.
      */
     TableSchema getSchema(String tableName) {
@@ -432,17 +440,18 @@ public class DeskDB implements AutoCloseable {
             ByteArrayOutputStream dataBaos = new ByteArrayOutputStream();
             DataOutputStream dataOut = new DataOutputStream(dataBaos);
             
-            // Guardar datos de cada tabla
+            // Guardar datos de cada tabla directamente del ConcurrentHashMap para evitar OOM
             for (Map.Entry<String, Table> entry : tables.entrySet()) {
                 Table table = entry.getValue();
-                List<Row> rows = table.select(null);
+                Map<Long, Row> tableData = getTableData(table);
                 
                 // Escribir nombre de tabla
                 dataOut.writeUTF(entry.getKey());
-                dataOut.writeInt(rows.size());
+                dataOut.writeInt(tableData.size());
                 
-                // Escribir cada fila
-                for (Row row : rows) {
+                // Escribir cada fila directamente del mapa interno
+                for (Map.Entry<Long, Row> rowEntry : tableData.entrySet()) {
+                    Row row = rowEntry.getValue();
                     dataOut.writeLong(row.getRowId());
                     Map<String, Object> values = row.getValues();
                     dataOut.writeInt(values.size());
