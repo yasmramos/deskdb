@@ -68,15 +68,40 @@ public class CoreOperationsBenchmark {
     }
 
     @Benchmark
-    public void insertOperation(Blackhole bh) throws Exception {
-        int id = nextId++;
-        tableOps.insert()
-                .value("id", id)
-                .value("name", "User" + id)
-                .value("email", "user" + id + "@test.com")
+    public void insertSingle_Durability(Blackhole bh) throws Exception {
+        // Mide latencia real de un insert con commit durable (fsync por operación)
+        // Este número DEBE ser bajo (~700-5k ops/s en SSD) debido al fsync
+        try (Transaction tx = deskDB.beginTransaction()) {
+            deskDB.table("users")
+                .insert()
+                .value("id", counter.incrementAndGet())
+                .value("name", "User")
+                .value("email", "u@e.com")
                 .value("age", 25)
-                .addRow()
+                .value("balance", 100.0)
                 .execute();
+            tx.commit(); // fsync aquí
+        }
+        bh.consume(true);
+    }
+
+    @Benchmark
+    public void insertBatch_Throughput(Blackhole bh) throws Exception {
+        // Mide throughput real agrupando 1000 inserts en un solo commit
+        // Objetivo: >50k ops/s (50M rows/s efectivo)
+        try (Transaction tx = deskDB.beginTransaction()) {
+            for (int i = 0; i < 1000; i++) {
+                deskDB.table("users")
+                    .insert()
+                    .value("id", counter.incrementAndGet())
+                    .value("name", "User")
+                    .value("email", "u@e.com")
+                    .value("age", 25)
+                    .value("balance", 100.0)
+                    .execute();
+            }
+            tx.commit(); // 1 fsync para 1000 filas
+        }
         bh.consume(true);
     }
 
