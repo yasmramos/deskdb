@@ -222,9 +222,16 @@ public class Wal implements AutoCloseable {
      */
     public synchronized void close() throws IOException {
         if (!closed) {
+            channel.force(true); // Asegurar que todos los datos estén en disco
             channel.close();
             closed = true;
             logger.info("WAL closed");
+        }
+    }
+    
+    public synchronized void flush() throws IOException {
+        if (channel != null && channel.isOpen()) {
+            channel.force(true);
         }
     }
     
