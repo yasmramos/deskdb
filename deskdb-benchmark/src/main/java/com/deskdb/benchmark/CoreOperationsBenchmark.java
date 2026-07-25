@@ -66,11 +66,12 @@ public class CoreOperationsBenchmark {
     public void insertBatch_Throughput(Blackhole bh) throws Exception {
         try (Transaction tx = database.beginTransaction()) {
             for (int i = 0; i < 1000; i++) {
+                int id = counter.incrementAndGet();
                 tx.table("users")
                     .insert()
-                    .value("id", counter.incrementAndGet())
-                    .value("name", "User")
-                    .value("email", "u@e.com")
+                    .value("id", id)
+                    .value("name", "User_" + id)
+                    .value("email", "user" + id + "@example.com")
                     .value("age", 25)
                     .value("balance", 100.0)
                     .execute();
