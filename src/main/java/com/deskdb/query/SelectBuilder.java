@@ -47,6 +47,14 @@ public class SelectBuilder {
     public FilterBuilder and(String column) {
         return new FilterBuilder(this, column);
     }
+    
+    public WhereCondition whereCond(String column) {
+        return new WhereCondition(column, this);
+    }
+    
+    public WhereCondition andCond(String column) {
+        return new WhereCondition(column, this);
+    }
 
     public SelectBuilder addFilter(Filter filter) {
         this.filters.add(filter);
@@ -249,13 +257,97 @@ public class SelectBuilder {
             return builder;
         }
         
+        public SelectBuilder eq(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.EQ, value));
+            return builder;
+        }
+        
+        public WhereCondition eqCond(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.EQ, value));
+            return this;
+        }
+        
+        public WhereCondition gtCond(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.GT, value));
+            return this;
+        }
+        
+        public WhereCondition gteCond(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.GTE, value));
+            return this;
+        }
+        
+        public WhereCondition ltCond(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.LT, value));
+            return this;
+        }
+        
+        public WhereCondition lteCond(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.LTE, value));
+            return this;
+        }
+        
+        public WhereCondition neCond(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.NE, value));
+            return this;
+        }
+        
+        public SelectBuilder ne(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.NE, value));
+            return builder;
+        }
+        
+        public SelectBuilder gt(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.GT, value));
+            return builder;
+        }
+        
+        public SelectBuilder gte(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.GTE, value));
+            return builder;
+        }
+        
+        public SelectBuilder lt(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.LT, value));
+            return builder;
+        }
+        
+        public SelectBuilder lte(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.LTE, value));
+            return builder;
+        }
+        
         public SelectBuilder isEqualTo(Object value) {
             builder.addFilter(new Filter(column, Filter.Operator.EQ, value));
             return builder;
         }
         
+        public WhereCondition and(String column) {
+            return new WhereCondition(column, builder);
+        }
+        
+        public WhereCondition andCond(String column) {
+            return new WhereCondition(column, builder);
+        }
+        
         public WhereCondition andWhere(String column) {
             return new WhereCondition(column, builder);
+        }
+        
+        public SelectBuilder limit(int limit) {
+            return builder.limit(limit);
+        }
+        
+        public SelectBuilder offset(int offset) {
+            return builder.offset(offset);
+        }
+        
+        public SelectBuilder orderBy(String column) {
+            return builder.orderBy(column);
+        }
+        
+        public SelectBuilder orderByDesc(String column) {
+            return builder.orderByDesc(column);
         }
     }
 }
