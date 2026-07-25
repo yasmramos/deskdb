@@ -257,6 +257,11 @@ public class SelectBuilder {
             return builder;
         }
         
+        public SelectBuilder eq(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.EQ, value));
+            return builder;
+        }
+        
         public WhereCondition eqCond(Object value) {
             builder.addFilter(new Filter(column, Filter.Operator.EQ, value));
             return this;
@@ -287,11 +292,6 @@ public class SelectBuilder {
             return this;
         }
         
-        public SelectBuilder isEqualTo(Object value) {
-            builder.addFilter(new Filter(column, Filter.Operator.EQ, value));
-            return builder;
-        }
-        
         public SelectBuilder ne(Object value) {
             builder.addFilter(new Filter(column, Filter.Operator.NE, value));
             return builder;
@@ -314,6 +314,11 @@ public class SelectBuilder {
         
         public SelectBuilder lte(Object value) {
             builder.addFilter(new Filter(column, Filter.Operator.LTE, value));
+            return builder;
+        }
+        
+        public SelectBuilder isEqualTo(Object value) {
+            builder.addFilter(new Filter(column, Filter.Operator.EQ, value));
             return builder;
         }
         
