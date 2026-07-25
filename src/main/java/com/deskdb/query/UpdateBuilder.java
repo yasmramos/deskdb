@@ -37,6 +37,11 @@ public class UpdateBuilder {
         return this;
     }
 
+    public UpdateBuilder set(java.util.Map<String, Object> values) {
+        setValues.putAll(values);
+        return this;
+    }
+
     public WhereCondition where(String column) {
         return new WhereCondition(column, this);
     }

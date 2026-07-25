@@ -89,7 +89,8 @@ public class Filter {
         Object rowValue = row.get(column);
         switch (operator) {
             case EQ: return safeEquals(rowValue, value);
-            case NEQ: return !safeEquals(rowValue, value);
+            case NEQ: 
+            case NE: return !safeEquals(rowValue, value);
             case GT: return safeCompare(rowValue, value) > 0;
             case LT: return safeCompare(rowValue, value) < 0;
             case GTE: return safeCompare(rowValue, value) >= 0;

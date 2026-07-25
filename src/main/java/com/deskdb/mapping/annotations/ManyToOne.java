@@ -17,4 +17,9 @@ public @interface ManyToOne {
      * The target entity class.
      */
     Class<?> targetEntity() default void.class;
+    
+    /**
+     * Whether to cascade persist operations.
+     */
+    boolean cascade() default true;
 }
