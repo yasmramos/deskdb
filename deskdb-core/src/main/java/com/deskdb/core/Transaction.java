@@ -73,41 +73,17 @@ public class Transaction implements AutoCloseable {
         
         lock.writeLock().lock();
         try {
-            // Si es transacción implícita, usar batching asíncrono
-            if (isImplicit) {
-                // Encolar la operación de commit para procesamiento por lotes
-                implicitTxBuffer.add(() -> doCommit());
-                
-                // Programar flush si no está ya programado
-                if (!flushScheduled) {
-                    synchronized (flushLock) {
-                        if (!flushScheduled) {
-                            flushScheduled = true;
-                            // Programar flush después de 5ms o cuando se acumulen 100 operaciones
-                            new Thread(() -> {
-                                try {
-                                    Thread.sleep(5);
-                                    flushImplicitBuffer();
-                                } catch (InterruptedException e) {
-                                    Thread.currentThread().interrupt();
-                                }
-                            }).start();
-                        }
-                    }
-                }
-                
-                // Esperar a que el buffer se procese (para mantener consistencia síncrona en tests)
-                // En producción real, esto sería completamente asíncrono
-                while (!implicitTxBuffer.isEmpty()) {
-                    try { Thread.sleep(1); } catch (InterruptedException e) { break; }
-                }
-            } else {
-                // Transacción explícita: commit inmediato
-                doCommit();
-            }
+            // Commit inmediato para transacciones explícitas e implícitas
+            doCommit();
             
             active = false;
             committed = true;
+            
+            // Liberar la transacción del ThreadLocal si es la activa
+            if (db.getCurrentTransaction() == this) {
+                db.releaseCurrentTransaction();
+            }
+            
             logger.info("Transaction {} committed successfully", transactionId);
         } finally {
             lock.writeLock().unlock();
