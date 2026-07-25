@@ -4,10 +4,12 @@ import com.deskdb.core.DeskDB;
 import com.deskdb.core.TableOperations;
 import com.deskdb.core.Column;
 import com.deskdb.core.DataType;
+import com.deskdb.core.Transaction;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.Blackhole;
 
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Benchmark de operaciones CRUD básicas en DeskDB.
@@ -23,7 +25,8 @@ public class CoreOperationsBenchmark {
 
     private DeskDB database;
     private TableOperations tableOps;
-    private int nextId = 1000; // Start from 1000 to avoid conflicts with preloaded data
+    private int nextId = 1000;
+    private AtomicInteger counter = new AtomicInteger(1000); // Start from 1000 to avoid conflicts with preloaded data
 
     @Setup
     public void setup() throws Exception {
@@ -71,8 +74,8 @@ public class CoreOperationsBenchmark {
     public void insertSingle_Durability(Blackhole bh) throws Exception {
         // Mide latencia real de un insert con commit durable (fsync por operación)
         // Este número DEBE ser bajo (~700-5k ops/s en SSD) debido al fsync
-        try (Transaction tx = deskDB.beginTransaction()) {
-            deskDB.table("users")
+        try (Transaction tx = database.beginTransaction()) {
+            database.table("users")
                 .insert()
                 .value("id", counter.incrementAndGet())
                 .value("name", "User")
@@ -89,9 +92,9 @@ public class CoreOperationsBenchmark {
     public void insertBatch_Throughput(Blackhole bh) throws Exception {
         // Mide throughput real agrupando 1000 inserts en un solo commit
         // Objetivo: >50k ops/s (50M rows/s efectivo)
-        try (Transaction tx = deskDB.beginTransaction()) {
+        try (Transaction tx = database.beginTransaction()) {
             for (int i = 0; i < 1000; i++) {
-                deskDB.table("users")
+                database.table("users")
                     .insert()
                     .value("id", counter.incrementAndGet())
                     .value("name", "User")

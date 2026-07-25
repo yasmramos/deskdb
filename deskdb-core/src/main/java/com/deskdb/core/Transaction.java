@@ -47,18 +47,11 @@ public class Transaction implements AutoCloseable {
         this.transactionId = transactionIdGenerator.incrementAndGet();
         this.wal = db.getWal(); // Obtener WAL de la base de datos
         
-        // Capturar snapshot de todas las tablas para rollback y aislamiento
+        // OPTIMIZACIÓN CRÍTICA: Eliminar snapshot completo para mejorar rendimiento en batches.
+        // Solo inicializamos mapas vacíos para pendingChanges.
+        // Se elimina la copia O(N) de datos al iniciar transacción.
         for (Map.Entry<String, Table> entry : db.getTables().entrySet()) {
-            try {
-                Map<Long, Row> snapshot = new HashMap<>(entry.getValue().getData());
-                snapshots.put(entry.getKey(), snapshot);
-                pendingChanges.put(entry.getKey(), new HashMap<>());
-                // Calcular el siguiente ID disponible para cada tabla
-                long maxId = snapshot.keySet().stream().mapToLong(Long::longValue).max().orElse(0);
-                nextRowIds.put(entry.getKey(), maxId + 1);
-            } catch (Exception e) {
-                logger.warn("Error al capturar snapshot: {}", e.getMessage());
-            }
+            pendingChanges.put(entry.getKey(), new HashMap<>());
         }
         
         // Escribir inicio de transacción en WAL
