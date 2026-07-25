@@ -229,13 +229,6 @@ public class DeskDB implements AutoCloseable {
     }
 
     /**
-     * Creates a BTree index on a specific column.
-     */
-    public <K extends Comparable<K>> void createIndex(String tableName, String indexName, String columnName) throws IOException {
-        createIndex(tableName, indexName, columnName, false);
-    }
-
-    /**
      * Creates an EntityManager for ORM operations.
      * 
      * @return EntityManager instance for entity operations
@@ -246,9 +239,8 @@ public class DeskDB implements AutoCloseable {
     }
 
     /**
-     * Creates an index on a column (single column).
+     * Creates a BTree index on a specific column.
      */
-    @SuppressWarnings("unchecked")
     public <K extends Comparable<K>> void createIndex(String tableName, String indexName, String columnName) throws IOException {
         createIndex(tableName, indexName, columnName, false);
     }
