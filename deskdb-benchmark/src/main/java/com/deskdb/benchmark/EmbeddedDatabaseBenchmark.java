@@ -32,7 +32,7 @@ import com.deskdb.core.Row;
  * - Delete performance
  */
 @State(Scope.Thread)
-@OutputTimeUnit(TimeUnit.MILLISECONDS)
+@OutputTimeUnit(TimeUnit.SECONDS)
 @BenchmarkMode(Mode.Throughput)
 @Warmup(iterations = 3, time = 2)
 @Measurement(iterations = 5, time = 2)
@@ -41,6 +41,9 @@ public class EmbeddedDatabaseBenchmark {
 
     // Test data size
     private static final int BATCH_SIZE = 1000;
+    
+    // ID counter for unique inserts
+    private int currentId = 1;
     
     // Database instances
     private DeskDB deskDB;
@@ -63,6 +66,7 @@ public class EmbeddedDatabaseBenchmark {
         deskDBFile = new File(tempDir, "bench_desk_" + System.nanoTime() + ".deskdb");
         try {
             deskDB = DeskDB.open(deskDBFile.getAbsolutePath());
+            setupDeskDBSchema();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -174,6 +178,17 @@ public class EmbeddedDatabaseBenchmark {
         }
     }
     
+    // Setup DeskDB schema
+    private void setupDeskDBSchema() throws Exception {
+        deskDB.table("users")
+            .column("id", int.class)
+            .column("name", String.class)
+            .column("email", String.class)
+            .column("age", int.class)
+            .column("balance", double.class)
+            .create();
+    }
+
     // Clear methods
     private void clearDeskDB() {
         try {
@@ -206,11 +221,12 @@ public class EmbeddedDatabaseBenchmark {
     @Benchmark
     public void insertSingle_DeskDB() {
         try {
+            int id = currentId++;
             deskDB.table("users")
                 .insert()
-                .value("id", 1)
-                .value("name", "Test User")
-                .value("email", "test@example.com")
+                .value("id", id)
+                .value("name", "Test User " + id)
+                .value("email", "test" + id + "@example.com")
                 .value("age", 30)
                 .value("balance", 1000.50)
                 .execute();
