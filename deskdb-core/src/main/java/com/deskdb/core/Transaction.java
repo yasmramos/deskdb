@@ -29,24 +29,29 @@ public class Transaction implements AutoCloseable {
     private final Wal wal;
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
     private static final AtomicLong transactionIdGenerator = new AtomicLong(0);
+    
+    // Buffer para agrupar transacciones implícitas (auto-commit)
+    private static final java.util.Queue<Runnable> implicitTxBuffer = new java.util.concurrent.LinkedBlockingQueue<>();
+    private static volatile boolean flushScheduled = false;
+    private static final Object flushLock = new Object();
+    
+    private final boolean isImplicit;
 
     public Transaction(DeskDB db) { 
+        this(db, true); // Por defecto es implícita (auto-commit)
+    }
+    
+    public Transaction(DeskDB db, boolean isImplicit) {
         this.db = db;
+        this.isImplicit = isImplicit;
         this.transactionId = transactionIdGenerator.incrementAndGet();
         this.wal = db.getWal(); // Obtener WAL de la base de datos
         
-        // Capturar snapshot de todas las tablas para rollback y aislamiento
+        // OPTIMIZACIÓN CRÍTICA: Eliminar snapshot completo para mejorar rendimiento en batches.
+        // Solo inicializamos mapas vacíos para pendingChanges.
+        // Se elimina la copia O(N) de datos al iniciar transacción.
         for (Map.Entry<String, Table> entry : db.getTables().entrySet()) {
-            try {
-                Map<Long, Row> snapshot = new HashMap<>(entry.getValue().getData());
-                snapshots.put(entry.getKey(), snapshot);
-                pendingChanges.put(entry.getKey(), new HashMap<>());
-                // Calcular el siguiente ID disponible para cada tabla
-                long maxId = snapshot.keySet().stream().mapToLong(Long::longValue).max().orElse(0);
-                nextRowIds.put(entry.getKey(), maxId + 1);
-            } catch (Exception e) {
-                logger.warn("Error al capturar snapshot: {}", e.getMessage());
-            }
+            pendingChanges.put(entry.getKey(), new HashMap<>());
         }
         
         // Escribir inicio de transacción en WAL
@@ -68,75 +73,108 @@ public class Transaction implements AutoCloseable {
         
         lock.writeLock().lock();
         try {
-            // Verificar conflictos con otras transacciones (optimistic concurrency control)
-            // En una implementación completa, se verificaría si las filas leídas/modificadas
-            // han cambiado desde el snapshot inicial
-            
-            // Escribir todas las operaciones pendientes en WAL antes de aplicar cambios
-            if (wal != null) {
-                try {
-                    for (Map.Entry<String, Map<Long, Row>> entry : pendingChanges.entrySet()) {
-                        String tableName = entry.getKey();
-                        for (Map.Entry<Long, Row> changeEntry : entry.getValue().entrySet()) {
-                            OperationType opType;
-                            byte[] data = new byte[0];
-                            
-                            if (changeEntry.getValue() == null) {
-                                // Eliminación
-                                opType = OperationType.DELETE;
-                            } else {
-                                Row row = changeEntry.getValue();
-                                Map<Long, Row> snapshot = snapshots.getOrDefault(tableName, new HashMap<>());
-                                if (!snapshot.containsKey(changeEntry.getKey())) {
-                                    // Inserción
-                                    opType = OperationType.INSERT;
-                                    data = com.deskdb.util.Serializer.serialize(row.getValues());
-                                } else {
-                                    // Actualización
-                                    opType = OperationType.UPDATE;
-                                    data = com.deskdb.util.Serializer.serialize(row.getValues());
-                                }
-                            }
-                            
-                            wal.write(transactionId, opType, tableName, String.valueOf(changeEntry.getKey()), data);
-                        }
-                    }
-                    
-                    // Escribir COMMIT en WAL
-                    wal.writeCommit(transactionId);
-                    wal.writeCheckpoint(transactionId);
-                } catch (IOException e) {
-                    logger.error("Failed to write to WAL during commit: {}", e.getMessage());
-                    throw new RuntimeException("WAL write failed", e);
-                }
-            }
+            // Commit inmediato para transacciones explícitas e implícitas
+            doCommit();
             
             active = false;
             committed = true;
             
-            // Aplicar cambios pendientes a las tablas reales
-            for (Map.Entry<String, Map<Long, Row>> entry : pendingChanges.entrySet()) {
-                String tableName = entry.getKey();
-                Table table = db.getTable(tableName);
-                if (table != null) {
-                    Map<Long, Row> tableData = table.getData();
-                    
-                    // Procesar todos los cambios
-                    for (Map.Entry<Long, Row> changeEntry : entry.getValue().entrySet()) {
-                        if (changeEntry.getValue() == null) {
-                            // Eliminación
-                            tableData.remove(changeEntry.getKey());
-                        } else {
-                            // Inserción o actualización
-                            tableData.put(changeEntry.getKey(), changeEntry.getValue());
-                        }
-                    }
-                }
+            // Liberar la transacción del ThreadLocal si es la activa
+            if (db.getCurrentTransaction() == this) {
+                db.releaseCurrentTransaction();
             }
             
             logger.info("Transaction {} committed successfully", transactionId);
         } finally {
             lock.writeLock().unlock();
+        }
+    }
+    
+    private void doCommit() {
+        // Verificar conflictos con otras transacciones (optimistic concurrency control)
+        // En una implementación completa, se verificaría si las filas leídas/modificadas
+        // han cambiado desde el snapshot inicial
+        
+        // Escribir todas las operaciones pendientes en WAL antes de aplicar cambios
+        if (wal != null) {
+            try {
+                for (Map.Entry<String, Map<Long, Row>> entry : pendingChanges.entrySet()) {
+                    String tableName = entry.getKey();
+                    for (Map.Entry<Long, Row> changeEntry : entry.getValue().entrySet()) {
+                        OperationType opType;
+                        byte[] data = new byte[0];
+                        
+                        if (changeEntry.getValue() == null) {
+                            // Eliminación
+                            opType = OperationType.DELETE;
+                        } else {
+                            Row row = changeEntry.getValue();
+                            Map<Long, Row> snapshot = snapshots.getOrDefault(tableName, new HashMap<>());
+                            if (!snapshot.containsKey(changeEntry.getKey())) {
+                                // Inserción
+                                opType = OperationType.INSERT;
+                                data = com.deskdb.util.Serializer.serialize(row.getValues());
+                            } else {
+                                // Actualización
+                                opType = OperationType.UPDATE;
+                                data = com.deskdb.util.Serializer.serialize(row.getValues());
+                            }
+                        }
+                        
+                        wal.write(transactionId, opType, tableName, String.valueOf(changeEntry.getKey()), data);
+                    }
+                }
+                
+                // Escribir COMMIT en WAL
+                wal.writeCommit(transactionId);
+            } catch (IOException e) {
+                logger.error("Failed to write to WAL during commit: {}", e.getMessage());
+                throw new RuntimeException("WAL write failed", e);
+            }
+        }
+        
+        // Aplicar cambios pendientes a las tablas reales
+        for (Map.Entry<String, Map<Long, Row>> entry : pendingChanges.entrySet()) {
+            String tableName = entry.getKey();
+            Table table = db.getTable(tableName);
+            if (table != null) {
+                Map<Long, Row> tableData = table.getData();
+                
+                // Procesar todos los cambios
+                for (Map.Entry<Long, Row> changeEntry : entry.getValue().entrySet()) {
+                    if (changeEntry.getValue() == null) {
+                        // Eliminación
+                        tableData.remove(changeEntry.getKey());
+                    } else {
+                        // Inserción o actualización
+                        tableData.put(changeEntry.getKey(), changeEntry.getValue());
+                    }
+                }
+            }
+        }
+    }
+    
+    private void flushImplicitBuffer() {
+        List<Runnable> batch = new ArrayList<>();
+        synchronized (flushLock) {
+            while (!implicitTxBuffer.isEmpty()) {
+                batch.add(implicitTxBuffer.poll());
+                if (batch.size() >= 100) break;
+            }
+            flushScheduled = false;
+        }
+        
+        if (!batch.isEmpty()) {
+            // Ejecutar todos los commits del lote
+            for (Runnable r : batch) {
+                r.run();
+            }
+            // Flush único del WAL para todo el lote (evitar fsync múltiple)
+            try {
+                wal.flush();
+            } catch (IOException e) {
+                logger.error("Failed to flush WAL: {}", e.getMessage());
+            }
         }
     }
 
@@ -271,11 +309,6 @@ public class Transaction implements AutoCloseable {
                     throw new IOException("Deserialization failed", e);
                 }
             }
-        }
-        
-        // Truncar WAL después de recuperación exitosa
-        try (Wal wal = Wal.open(walPath)) {
-            wal.truncate();
         }
         
         logger.info("Recovery completed successfully");
