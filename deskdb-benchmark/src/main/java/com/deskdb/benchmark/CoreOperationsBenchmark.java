@@ -4,15 +4,13 @@ import com.deskdb.core.DeskDB;
 import com.deskdb.core.TableOperations;
 import com.deskdb.core.Column;
 import com.deskdb.core.DataType;
+import com.deskdb.core.Transaction;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.Blackhole;
 
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * Benchmark de operaciones CRUD básicas en DeskDB.
- * Mide throughput y latencia de inserciones, lecturas, actualizaciones y eliminaciones.
- */
 @State(Scope.Thread)
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.SECONDS)
@@ -23,7 +21,7 @@ public class CoreOperationsBenchmark {
 
     private DeskDB database;
     private TableOperations tableOps;
-    private int nextId = 1000; // Start from 1000 to avoid conflicts with preloaded data
+    private AtomicInteger counter = new AtomicInteger(1000);
 
     @Setup
     public void setup() throws Exception {
@@ -33,57 +31,59 @@ public class CoreOperationsBenchmark {
             new Column("id", DataType.INT).primaryKey(),
             new Column("name", DataType.STRING),
             new Column("email", DataType.STRING),
-            new Column("age", DataType.INT)
+            new Column("age", DataType.INT),
+            new Column("balance", DataType.DOUBLE)
         );
-        
         tableOps = database.table("users");
-        
-        // Precargar algunos datos para tests de lectura/actualización
-        for (int i = 0; i < 100; i++) {
-            tableOps.insert()
-                    .value("id", i)
-                    .value("name", "User" + i)
-                    .value("email", "user" + i + "@test.com")
-                    .value("age", 20 + i)
-                    .execute();
-        }
     }
 
     @TearDown
     public void tearDown() throws Exception {
         if (database != null) {
-            try {
-                database.close();
-            } catch (Exception e) {
-                // Ignorar errores en cleanup durante benchmark
-            }
-            // Eliminar archivo temporal
+            database.close();
             try {
                 java.nio.file.Files.deleteIfExists(java.nio.file.Paths.get(database.getFilePath()));
                 java.nio.file.Files.deleteIfExists(java.nio.file.Paths.get(database.getFilePath() + ".wal"));
-            } catch (Exception e) {
-                // Ignorar errores al eliminar archivos
-            }
+            } catch (Exception e) { /* ignore */ }
         }
     }
 
     @Benchmark
-    public void insertOperation(Blackhole bh) throws Exception {
-        int id = nextId++;
-        tableOps.insert()
-                .value("id", id)
-                .value("name", "User" + id)
-                .value("email", "user" + id + "@test.com")
-                .value("age", 25)
-                .execute();
+    public void insertSingle_Durability(Blackhole bh) throws Exception {
+        int id = counter.incrementAndGet();
+        database.table("users")
+            .insert()
+            .value("id", id)
+            .value("name", "User")
+            .value("email", "u@e.com")
+            .value("age", 25)
+            .value("balance", 100.0)
+            .execute();
+        bh.consume(true);
+    }
+
+    @Benchmark
+    public void insertBatch_Throughput(Blackhole bh) throws Exception {
+        try (Transaction tx = database.beginTransaction()) {
+            for (int i = 0; i < 1000; i++) {
+                int id = counter.incrementAndGet();
+                tx.table("users")
+                    .insert()
+                    .value("id", id)
+                    .value("name", "User_" + id)
+                    .value("email", "user" + id + "@example.com")
+                    .value("age", 25)
+                    .value("balance", 100.0)
+                    .execute();
+            }
+            tx.commit();
+        }
         bh.consume(true);
     }
 
     @Benchmark
     public void selectByIdOperation(Blackhole bh) throws Exception {
-        var results = tableOps.select()
-                .where("id").eq(50)
-                .execute();
+        var results = tableOps.select().where("id").eq(50).execute();
         bh.consume(results);
     }
 
@@ -95,26 +95,14 @@ public class CoreOperationsBenchmark {
 
     @Benchmark
     public void updateOperation(Blackhole bh) throws Exception {
-        int updated = tableOps.update()
-                .set("name", "UpdatedUser")
-                .where("id").eq(50)
-                .execute();
+        int updated = tableOps.update().set("name", "UpdatedUser").where("id").eq(50).execute();
         bh.consume(updated);
     }
 
     @Benchmark
     public void deleteOperation(Blackhole bh) throws Exception {
-        int deleted = tableOps.delete()
-                .where("id").eq(99)
-                .execute();
+        int deleted = tableOps.delete().where("id").eq(99).execute();
         bh.consume(deleted);
-        
-        // Re-insertar para mantener estado consistente
-        tableOps.insert()
-                .value("id", 99)
-                .value("name", "User99")
-                .value("email", "user99@test.com")
-                .value("age", 124)
-                .execute();
+        tableOps.insert().value("id", 99).value("name", "User99").value("email", "user99@test.com").value("age", 124).execute();
     }
 }
