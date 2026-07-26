@@ -270,11 +270,31 @@ public class Transaction implements AutoCloseable {
                 // Procesar todos los cambios
                 for (Map.Entry<Long, Row> changeEntry : entry.getValue().entrySet()) {
                     if (changeEntry.getValue() == null) {
-                        // Eliminación
-                        tableData.remove(changeEntry.getKey());
+                        // Eliminación - remover de datos y actualizar índices
+                        Row removedRow = tableData.remove(changeEntry.getKey());
+                        if (removedRow != null) {
+                            // Eliminar de todos los índices
+                            table.removeFromIndexes(removedRow, changeEntry.getKey());
+                        }
                     } else {
                         // Inserción o actualización
-                        tableData.put(changeEntry.getKey(), changeEntry.getValue());
+                        Row newRow = changeEntry.getValue();
+                        Map<Long, Row> snapshot = snapshots.getOrDefault(tableName, new HashMap<>());
+                        
+                        if (!snapshot.containsKey(changeEntry.getKey())) {
+                            // Nueva inserción
+                            tableData.put(changeEntry.getKey(), newRow);
+                            // Insertar en índices
+                            table.insertIntoIndexes(newRow, changeEntry.getKey());
+                        } else {
+                            // Actualización - remover viejo valor de índices e insertar nuevo
+                            Row oldRow = tableData.get(changeEntry.getKey());
+                            if (oldRow != null) {
+                                table.removeFromIndexes(oldRow, changeEntry.getKey());
+                            }
+                            tableData.put(changeEntry.getKey(), newRow);
+                            table.insertIntoIndexes(newRow, changeEntry.getKey());
+                        }
                     }
                 }
             }
