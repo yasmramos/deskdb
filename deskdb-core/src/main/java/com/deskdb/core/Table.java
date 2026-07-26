@@ -195,6 +195,34 @@ public class Table {
         }
     }
     
+    /**
+     * Removes a row from all indexes. Used by Transaction during commit.
+     */
+    void removeFromIndexes(Row row, long rowId) {
+        synchronized (lock) {
+            for (Map.Entry<String, String> entry : columnToIndex.entrySet()) {
+                Object val = row.get(entry.getKey());
+                if (val != null) {
+                    indexes.get(entry.getValue()).delete((Comparable) val, rowId);
+                }
+            }
+        }
+    }
+    
+    /**
+     * Inserts a row into all indexes. Used by Transaction during commit.
+     */
+    void insertIntoIndexes(Row row, long rowId) {
+        synchronized (lock) {
+            for (Map.Entry<String, String> entry : columnToIndex.entrySet()) {
+                Object val = row.get(entry.getKey());
+                if (val != null) {
+                    indexes.get(entry.getValue()).insert((Comparable) val, rowId);
+                }
+            }
+        }
+    }
+    
     public long size() throws IOException {
         return data.size();
     }
