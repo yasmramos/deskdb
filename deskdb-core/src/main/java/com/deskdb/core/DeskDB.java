@@ -109,12 +109,18 @@ public class DeskDB implements AutoCloseable {
 
     /**
      * Obtiene una tabla por nombre para realizar operaciones.
+     * Si existe una transacción activa en este hilo, la utiliza automáticamente.
      *
      * @param tableName Nombre de la tabla
      * @return TableOperations para realizar CRUD
      */
     public TableOperations table(String tableName) {
         checkClosed();
+        // Reutilizar transacción activa si existe
+        Transaction existingTx = currentTransaction.get();
+        if (existingTx != null) {
+            return new TableOperations(this, tableName, existingTx);
+        }
         return new TableOperations(this, tableName);
     }
 

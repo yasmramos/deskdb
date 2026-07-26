@@ -13,12 +13,21 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Write-Ahead Log (WAL) para garantizar durabilidad y recuperación ante fallos.
+ * Write-Ahead Log (WAL) optimizado para alto rendimiento.
  * 
- * El WAL registra todas las operaciones antes de aplicarlas al archivo principal,
- * permitiendo recuperar el estado en caso de fallo.
+ * Mejoras implementadas:
+ * 1. Buffer de escrituras para agrupar operaciones
+ * 2. Flush asíncrono en background thread
+ * 3. Commit batching para reducir fsync calls
+ * 4. Eliminación de sincronización excesiva
  */
 public class Wal implements AutoCloseable {
     private static final Logger logger = LoggerFactory.getLogger(Wal.class);
@@ -27,11 +36,25 @@ public class Wal implements AutoCloseable {
     private static final byte[] MAGIC_BYTES = "DESKDB_WAL".getBytes();
     private static final int HEADER_SIZE = 20; // 10 magic + 4 version + 4 checksum + 2 length
     
+    // Configuración de buffering
+    private static final int DEFAULT_BUFFER_SIZE = 1024; // Número máximo de entradas en buffer
+    private static final long FLUSH_INTERVAL_MS = 5; // Intervalo de flush en ms
+    private static final int BATCH_COMMIT_THRESHOLD = 100; // Commit después de N operaciones
+    
     private final Path walPath;
     private final FileChannel channel;
     private long position = 0;
     private boolean closed = false;
-    private boolean needsForce = false; // Buffer para flush diferido
+    
+    // Buffer de escrituras pendientes
+    private final BlockingQueue<WalEntry> writeBuffer;
+    private final ExecutorService flushExecutor;
+    private final AtomicBoolean flushScheduled;
+    private volatile boolean needsForce = false;
+    
+    // Contador de operaciones pendientes de commit
+    private volatile int pendingOperations = 0;
+    private final Object commitLock = new Object();
     
     /**
      * Tipos de operaciones registradas en el WAL
@@ -106,7 +129,50 @@ public class Wal implements AutoCloseable {
             position = channel.size();
         }
         
-        logger.info("WAL initialized at {}", walPath.toAbsolutePath());
+        // Inicializar buffer y executor para flush asíncrono
+        this.writeBuffer = new ArrayBlockingQueue<>(DEFAULT_BUFFER_SIZE);
+        this.flushExecutor = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "WAL-Flush-Thread");
+            t.setDaemon(true);
+            return t;
+        });
+        this.flushScheduled = new AtomicBoolean(false);
+        
+        // Iniciar thread de flush periódico
+        startPeriodicFlush();
+        
+        logger.info("WAL initialized at {} with async flush enabled", walPath.toAbsolutePath());
+    }
+    
+    /**
+     * Inicia el thread de flush periódico en background
+     */
+    private void startPeriodicFlush() {
+        flushExecutor.submit(() -> {
+            while (!closed && !Thread.currentThread().isInterrupted()) {
+                try {
+                    // Esperar un breve intervalo antes de verificar si hay datos
+                    Thread.sleep(FLUSH_INTERVAL_MS);
+                    
+                    // Si hay operaciones pendientes, hacer flush
+                    if (pendingOperations > 0 || !writeBuffer.isEmpty()) {
+                        doFlush();
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (Exception e) {
+                    logger.error("Error in periodic flush: {}", e.getMessage());
+                }
+            }
+            
+            // Flush final antes de terminar
+            try {
+                doFlush();
+            } catch (IOException e) {
+                logger.error("Error in final flush: {}", e.getMessage());
+            }
+        });
     }
     
     /**
@@ -117,36 +183,101 @@ public class Wal implements AutoCloseable {
     }
     
     /**
-     * Escribe una entrada en el WAL
+     * Escribe una entrada en el WAL de forma asíncrona y bufferizada
      */
-    public synchronized void write(long transactionId, OperationType operation, 
+    public void write(long transactionId, OperationType operation, 
                                    String tableName, String key, byte[] data) throws IOException {
         checkClosed();
         
         long timestamp = System.currentTimeMillis();
         WalEntry entry = new WalEntry(timestamp, transactionId, operation, tableName, key, data);
-        ByteBuffer buffer = serializeEntry(entry);
-        channel.position(position);
-        channel.position(position);
-        // El flush real se hace en writeCommit (flush diferido)
-        needsForce = true;
         
-        position += buffer.limit();
+        // Añadir al buffer para escritura asíncrona
+        if (!writeBuffer.offer(entry)) {
+            // Si el buffer está lleno, hacer flush síncrono
+            doFlush();
+            writeBuffer.offer(entry);
+        }
         
-        logger.trace("WAL entry written: tx={}, op={}, table={}, key={}", 
+        pendingOperations++;
+        
+        // Programar flush si no está ya programado
+        scheduleFlush();
+        
+        logger.trace("WAL entry buffered: tx={}, op={}, table={}, key={}", 
                     transactionId, operation, tableName, key);
     }
     
     /**
-     * Escribe una operación de commit
+     * Programa un flush asíncrono si no hay uno pendiente
+     */
+    private void scheduleFlush() {
+        if (flushScheduled.compareAndSet(false, true)) {
+            flushExecutor.submit(() -> {
+                try {
+                    // Pequeño delay para agrupar más operaciones
+                    Thread.sleep(1);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                try {
+                    doFlush();
+                } catch (IOException e) {
+                    logger.error("Error in scheduled flush: {}", e.getMessage());
+                } finally {
+                    flushScheduled.set(false);
+                }
+            });
+        }
+    }
+    
+    /**
+     * Realiza el flush de todas las entradas bufferizadas al disco
+     */
+    private synchronized void doFlush() throws IOException {
+        if (writeBuffer.isEmpty() && pendingOperations == 0) {
+            return;
+        }
+        
+        List<WalEntry> batch = new ArrayList<>();
+        writeBuffer.drainTo(batch, BATCH_COMMIT_THRESHOLD);
+        
+        if (batch.isEmpty() && pendingOperations > 0) {
+            // No hay entradas nuevas pero hay operaciones pendientes
+            // Esto puede pasar si las entradas ya fueron escritas pero no flushed
+            channel.force(false);
+            pendingOperations = 0;
+            return;
+        }
+        
+        // Escribir todas las entradas del batch
+        for (WalEntry entry : batch) {
+            ByteBuffer buffer = serializeEntry(entry);
+            channel.position(position);
+            channel.write(buffer);
+            position += buffer.limit();
+        }
+        
+        // Forzar escritura al disco solo una vez por batch
+        if (!batch.isEmpty()) {
+            channel.force(false);
+            pendingOperations = Math.max(0, pendingOperations - batch.size());
+        }
+        
+        logger.debug("Flushed {} entries to WAL", batch.size());
+    }
+    
+    /**
+     * Escribe una operación de commit con flush inmediato para garantizar durabilidad
      */
     public synchronized void writeCommit(long transactionId) throws IOException {
+        // Escribir COMMIT como entrada normal (se bufferiza)
         write(transactionId, OperationType.COMMIT, "", "", new byte[0]);
-        // Flush diferido: forzar todas las escrituras pendientes al disco
-        if (needsForce) {
-            channel.force(false);
-            needsForce = false;
-        }
+        
+        // Forzar flush inmediato para garantizar que el commit esté en disco
+        doFlush();
+        
+        logger.info("Transaction {} committed to WAL", transactionId);
     }
     
     /**
@@ -211,6 +342,8 @@ public class Wal implements AutoCloseable {
      */
     public synchronized void truncate() throws IOException {
         checkClosed();
+        // Esperar a que el buffer esté vacío antes de truncar
+        doFlush();
         channel.truncate(0);
         position = 0;
         writeHeader();
@@ -218,21 +351,35 @@ public class Wal implements AutoCloseable {
     }
     
     /**
-     * Cierra el WAL
+     * Cierra el WAL haciendo flush final de todas las operaciones pendientes
      */
     public synchronized void close() throws IOException {
         if (!closed) {
+            // Flush final de todas las operaciones pendientes
+            doFlush();
+            
+            // Shutdown del executor
+            if (flushExecutor != null && !flushExecutor.isShutdown()) {
+                flushExecutor.shutdown();
+                try {
+                    if (!flushExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                        flushExecutor.shutdownNow();
+                    }
+                } catch (InterruptedException e) {
+                    flushExecutor.shutdownNow();
+                    Thread.currentThread().interrupt();
+                }
+            }
+            
             channel.force(true); // Asegurar que todos los datos estén en disco
             channel.close();
             closed = true;
-            logger.info("WAL closed");
+            logger.info("WAL closed after flushing {} pending operations", pendingOperations);
         }
     }
     
     public synchronized void flush() throws IOException {
-        if (channel != null && channel.isOpen()) {
-            channel.force(true);
-        }
+        doFlush();
     }
     
     /**
