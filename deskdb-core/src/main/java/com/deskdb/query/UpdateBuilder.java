@@ -47,11 +47,17 @@ public class UpdateBuilder {
         }
         
         List<Row> rows;
+        String actualTableName = tableName != null ? tableName : table.getName();
+        
         if (transaction != null) {
-            // Leer desde el snapshot + cambios pendientes
-            rows = transaction.select(tableName, java.util.Collections.singletonList(filter));
+            // Read from snapshot + pending changes
+            rows = transaction.select(actualTableName, java.util.Collections.singletonList(filter));
         } else {
             rows = table.select(java.util.Collections.singletonList(filter));
+        }
+        
+        if (rows.isEmpty()) {
+            return 0;
         }
         
         for (Row row : rows) {
@@ -59,9 +65,16 @@ public class UpdateBuilder {
                 Map<String, Object> newValues = new HashMap<>(row.getValues());
                 newValues.putAll(setValues);
                 Row newRow = new Row(row.getRowId(), newValues);
-                transaction.applyChange(tableName, row.getRowId(), newRow);
+                transaction.applyChange(actualTableName, row.getRowId(), newRow);
             } else {
-                table.update(row.getRowId(), setValues);
+                // Auto-commit: create implicit transaction for the entire operation
+                try (Transaction autoTx = table.getDb().beginTransaction()) {
+                    Map<String, Object> newValues = new HashMap<>(row.getValues());
+                    newValues.putAll(setValues);
+                    Row newRow = new Row(row.getRowId(), newValues);
+                    autoTx.applyChange(table.getName(), row.getRowId(), newRow);
+                    autoTx.commit();
+                }
             }
         }
         return rows.size();
