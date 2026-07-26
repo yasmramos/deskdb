@@ -1,52 +1,43 @@
 ```
-# Compiled and binary files
+# Compiled and build artifacts
 *.class
 *.o
 *.obj
-*.exe
-*.dll
-*.so
-*.a
 *.out
+build/
+target/
 
 # Dependencies
-lib/
-libs/
-dependencies/
-
-# Build artifacts
-target/
-build/
-dist/
-out/
-
-# Java specific
-*.jar
-*.war
-*.ear
-META-INF/
-
-# IDE files
-.vscode/
-.idea/
-*.iml
-*.ipr
-*.iws
-*.swp
-*.swo
+.gradle/
+.mypy_cache/
+.pytest_cache/
+__pycache__/
+node_modules/
+venv/
+.venv/
 
 # Logs and temp files
 *.log
 *.tmp
-*.temp
-*.cache
-
-# System files
-.DS_Store
-Thumbs.db
+*.swp
 
 # Environment
 .env
 .env.local
 *.env.*
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# System
+.DS_Store
+Thumbs.db
 ```
