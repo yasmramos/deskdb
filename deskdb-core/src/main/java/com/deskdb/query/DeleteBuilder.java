@@ -39,12 +39,24 @@ public class DeleteBuilder {
         } else {
             rows = table.select(Collections.singletonList(filter));
         }
+
+        if (rows.isEmpty()) {
+            return 0;
+        }
         
-        for (Row row : rows) {
-            if (transaction != null) {
+        if (transaction != null) {
+            // Usar la transacción proporcionada
+            for (Row row : rows) {
                 transaction.applyChange(tableName, row.getRowId(), null);
-            } else {
-                table.delete(row.getRowId());
+            }
+            // No hacer commit aquí - el usuario debe hacerlo explícitamente
+        } else {
+            // Auto-commit: crear transacción implícita para toda la operación
+            try (Transaction autoTx = table.getDb().beginTransaction()) {
+                for (Row row : rows) {
+                    autoTx.applyChange(tableName, row.getRowId(), null);
+                }
+                autoTx.commit();
             }
         }
         return rows.size();
