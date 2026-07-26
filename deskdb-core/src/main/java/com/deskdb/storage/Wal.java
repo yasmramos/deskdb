@@ -46,6 +46,11 @@ public class Wal implements AutoCloseable {
     private long position = 0;
     private boolean closed = false;
     
+    // Getter for walPath
+    public Path getWalPath() {
+        return walPath;
+    }
+    
     // Buffer de escrituras pendientes
     private final BlockingQueue<WalEntry> writeBuffer;
     private final ExecutorService flushExecutor;
@@ -405,8 +410,19 @@ public class Wal implements AutoCloseable {
     private void writeHeader() throws IOException {
         ByteBuffer buffer = ByteBuffer.allocate(HEADER_SIZE);
         buffer.put(MAGIC_BYTES);
-        buffer.putInt(1); // Versión
-        buffer.putInt(0); // Checksum (placeholder)
+        buffer.putInt(1); // Version
+        buffer.putInt(0); // Checksum placeholder
+        buffer.putShort((short) 0); // Reserved
+        
+        // Calculate checksum over header (excluding checksum field itself)
+        buffer.flip();
+        int checksum = calculateChecksum(buffer);
+        
+        // Rewrite with correct checksum
+        buffer.clear();
+        buffer.put(MAGIC_BYTES);
+        buffer.putInt(1); // Version
+        buffer.putInt(checksum); // Actual checksum
         buffer.putShort((short) 0); // Reserved
         buffer.flip();
         
@@ -418,19 +434,30 @@ public class Wal implements AutoCloseable {
     private void validateHeader() throws IOException {
         ByteBuffer buffer = ByteBuffer.allocate(HEADER_SIZE);
         channel.position(0);
-        channel.read(buffer);
+        if (channel.read(buffer) < HEADER_SIZE) {
+            throw new IOException("WAL file too small: corrupted header");
+        }
         buffer.flip();
         
-        byte[] magic = new byte[10];
+        byte[] magic = new byte[MAGIC_BYTES.length];
         buffer.get(magic);
         
         if (!java.util.Arrays.equals(MAGIC_BYTES, magic)) {
-            throw new IOException("Archivo WAL inválido: magic bytes incorrectos");
+            throw new IOException("Invalid WAL file: incorrect magic bytes");
         }
         
         int version = buffer.getInt();
         if (version != 1) {
-            throw new IOException("Versión de WAL no soportada: " + version);
+            throw new IOException("Unsupported WAL version: " + version);
+        }
+        
+        // Verify checksum
+        int storedChecksum = buffer.getInt();
+        buffer.flip();
+        int calculatedChecksum = calculateChecksum(buffer);
+        
+        if (storedChecksum != calculatedChecksum) {
+            throw new IOException("Invalid WAL file: checksum mismatch");
         }
     }
     
