@@ -18,6 +18,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Punto de entrada principal para DeskDB.
@@ -26,6 +27,9 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class DeskDB implements AutoCloseable {
     private static final Logger logger = LoggerFactory.getLogger(DeskDB.class);
+    
+    // ThreadLocal para rastrear transacciones activas y evitar anidamiento
+    private static final ThreadLocal<Transaction> currentTransaction = new ThreadLocal<>();
 
     private final Path dbPath;
     private final Map<String, Table> tables;
@@ -33,6 +37,7 @@ public class DeskDB implements AutoCloseable {
     private final Map<String, Map<String, BTree<?, ?>>> indexes; // tableName -> indexName -> BTree
     private Wal wal;
     private boolean closed = false;
+    private final AtomicInteger transactionCounter = new AtomicInteger(0);
 
     public String getFilePath() {
         return dbPath.toString();
@@ -139,6 +144,7 @@ public class DeskDB implements AutoCloseable {
         registerSchema(tableName, schema);
         
         Table table = new Table(tableName, List.of(columns), dbPath.toString());
+        table.setDb(this);
         tables.put(tableName, table);
         indexes.put(tableName, new ConcurrentHashMap<>());
         
@@ -196,12 +202,39 @@ public class DeskDB implements AutoCloseable {
 
     /**
      * Inicia una nueva transacción ACID.
+     * Si ya existe una transacción activa en este hilo, la devuelve (evita anidamiento).
      * 
      * @return Transacción para realizar operaciones atómicas
      */
     public Transaction beginTransaction() throws IOException {
         checkClosed();
-        return new Transaction(this);
+        
+        // Si ya hay una transacción activa en este hilo, la retornamos para evitar anidamiento
+        Transaction existingTx = currentTransaction.get();
+        if (existingTx != null) {
+            logger.debug("Reusing existing transaction in thread {}", Thread.currentThread().getName());
+            return existingTx;
+        }
+        
+        Transaction tx = new Transaction(this);
+        currentTransaction.set(tx);
+        logger.debug("Started new transaction {} in thread {}", transactionCounter.incrementAndGet(), Thread.currentThread().getName());
+        return tx;
+    }
+    
+    /**
+     * Obtiene la transacción activa actual en este hilo, si existe.
+     * @return La transacción activa o null si no hay ninguna
+     */
+    public Transaction getCurrentTransaction() {
+        return currentTransaction.get();
+    }
+    
+    /**
+     * Libera la transacción activa del hilo actual (llamado internamente tras commit/rollback).
+     */
+    void releaseCurrentTransaction() {
+        currentTransaction.remove();
     }
 
     /**
@@ -366,6 +399,7 @@ public class DeskDB implements AutoCloseable {
                     
                     // Crear tabla
                     Table table = new Table(tableName, List.of(columns), dbPath.toString());
+                    table.setDb(this);
                     tables.put(tableName, table);
                 }
                 
