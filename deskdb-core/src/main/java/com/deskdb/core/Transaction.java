@@ -30,12 +30,19 @@ public class Transaction implements AutoCloseable {
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
     private static final AtomicLong transactionIdGenerator = new AtomicLong(0);
     
-    // Buffer para agrupar transacciones implícitas (auto-commit)
-    private static final java.util.Queue<Runnable> implicitTxBuffer = new java.util.concurrent.LinkedBlockingQueue<>();
+    // Buffer global para agrupar commits de transacciones implícitas
+    private static final java.util.Queue<Transaction> implicitTxBuffer = new java.util.concurrent.ConcurrentLinkedQueue<>();
     private static volatile boolean flushScheduled = false;
     private static final Object flushLock = new Object();
+    private static final java.util.concurrent.ExecutorService batchFlushExecutor = 
+        java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "Transaction-Batch-Flush");
+            t.setDaemon(true);
+            return t;
+        });
     
     private final boolean isImplicit;
+    private boolean flushed = false; // Para evitar doble flush en transacciones bufferizadas
 
     public Transaction(DeskDB db) { 
         this(db, true); // Por defecto es implícita (auto-commit)
@@ -71,9 +78,32 @@ public class Transaction implements AutoCloseable {
     public void commit() {
         if (!active) throw new IllegalStateException("Transaction already closed");
         
+        // Para transacciones implícitas, usar batching síncrono inmediato
+        if (isImplicit && !flushed) {
+            // Ejecutar commit inmediatamente pero con optimización de batch
+            lock.writeLock().lock();
+            try {
+                doCommit();
+                
+                active = false;
+                committed = true;
+                flushed = true;
+                
+                // Liberar la transacción del ThreadLocal
+                if (db.getCurrentTransaction() == this) {
+                    db.releaseCurrentTransaction();
+                }
+                
+                logger.debug("Transaction {} committed immediately", transactionId);
+            } finally {
+                lock.writeLock().unlock();
+            }
+            return;
+        }
+        
+        // Para transacciones explícitas, commit inmediato
         lock.writeLock().lock();
         try {
-            // Commit inmediato para transacciones explícitas e implícitas
             doCommit();
             
             active = false;
@@ -87,6 +117,103 @@ public class Transaction implements AutoCloseable {
             logger.info("Transaction {} committed successfully", transactionId);
         } finally {
             lock.writeLock().unlock();
+        }
+    }
+    
+    /**
+     * Procesa un lote de transacciones implícitas agrupadas
+     */
+    private void processBatch() {
+        List<Transaction> batch = new ArrayList<>();
+        synchronized (flushLock) {
+            // Recoger hasta 100 transacciones o las que haya disponibles
+            while (!implicitTxBuffer.isEmpty() && batch.size() < 100) {
+                Transaction tx = implicitTxBuffer.poll();
+                if (tx != null && !tx.flushed) {
+                    batch.add(tx);
+                }
+            }
+            flushScheduled = false;
+        }
+        
+        if (batch.isEmpty()) {
+            return;
+        }
+        
+        // Ejecutar commits en batch dentro de una sola escritura WAL
+        Wal wal = db.getWal();
+        if (wal != null) {
+            try {
+                // Escribir todas las operaciones de todas las transacciones del batch
+                for (Transaction tx : batch) {
+                    tx.lock.writeLock().lock();
+                    try {
+                        if (tx.pendingChanges.isEmpty()) {
+                            continue;
+                        }
+                        
+                        // Escribir operaciones de esta transacción
+                        for (Map.Entry<String, Map<Long, Row>> entry : tx.pendingChanges.entrySet()) {
+                            String tableName = entry.getKey();
+                            for (Map.Entry<Long, Row> changeEntry : entry.getValue().entrySet()) {
+                                OperationType opType;
+                                byte[] data = new byte[0];
+                                
+                                if (changeEntry.getValue() == null) {
+                                    opType = OperationType.DELETE;
+                                } else {
+                                    Row row = changeEntry.getValue();
+                                    Map<Long, Row> snapshot = tx.snapshots.getOrDefault(tableName, new HashMap<>());
+                                    if (!snapshot.containsKey(changeEntry.getKey())) {
+                                        opType = OperationType.INSERT;
+                                        data = com.deskdb.util.Serializer.serialize(row.getValues());
+                                    } else {
+                                        opType = OperationType.UPDATE;
+                                        data = com.deskdb.util.Serializer.serialize(row.getValues());
+                                    }
+                                }
+                                
+                                wal.write(tx.transactionId, opType, tableName, String.valueOf(changeEntry.getKey()), data);
+                            }
+                        }
+                        
+                        // Escribir COMMIT para esta transacción
+                        wal.write(tx.transactionId, OperationType.COMMIT, "", "", new byte[0]);
+                        
+                        // Aplicar cambios a las tablas
+                        for (Map.Entry<String, Map<Long, Row>> entry : tx.pendingChanges.entrySet()) {
+                            String tableName = entry.getKey();
+                            Table table = tx.db.getTable(tableName);
+                            if (table != null) {
+                                Map<Long, Row> tableData = table.getData();
+                                for (Map.Entry<Long, Row> changeEntry : entry.getValue().entrySet()) {
+                                    if (changeEntry.getValue() == null) {
+                                        tableData.remove(changeEntry.getKey());
+                                    } else {
+                                        tableData.put(changeEntry.getKey(), changeEntry.getValue());
+                                    }
+                                }
+                            }
+                        }
+                        
+                        tx.committed = true;
+                        logger.debug("Batch transaction {} committed", tx.transactionId);
+                    } finally {
+                        tx.lock.writeLock().unlock();
+                    }
+                }
+                
+                // Flush único para todo el batch
+                wal.flush();
+                logger.info("Batch commit completed: {} transactions", batch.size());
+                
+            } catch (IOException e) {
+                logger.error("Failed to commit batch: {}", e.getMessage());
+                // Marcar transacciones como no commitidas
+                for (Transaction tx : batch) {
+                    tx.committed = false;
+                }
+            }
         }
     }
     
@@ -155,27 +282,9 @@ public class Transaction implements AutoCloseable {
     }
     
     private void flushImplicitBuffer() {
-        List<Runnable> batch = new ArrayList<>();
-        synchronized (flushLock) {
-            while (!implicitTxBuffer.isEmpty()) {
-                batch.add(implicitTxBuffer.poll());
-                if (batch.size() >= 100) break;
-            }
-            flushScheduled = false;
-        }
-        
-        if (!batch.isEmpty()) {
-            // Ejecutar todos los commits del lote
-            for (Runnable r : batch) {
-                r.run();
-            }
-            // Flush único del WAL para todo el lote (evitar fsync múltiple)
-            try {
-                wal.flush();
-            } catch (IOException e) {
-                logger.error("Failed to flush WAL: {}", e.getMessage());
-            }
-        }
+        // Método obsoleto - ahora se usa processBatch()
+        // Se mantiene por compatibilidad pero no hace nada
+        logger.debug("flushImplicitBuffer deprecated - using batch processing instead");
     }
 
     public void rollback() {
@@ -217,9 +326,22 @@ public class Transaction implements AutoCloseable {
      * Aplica un cambio pendiente en esta transacción.
      */
     public void applyChange(String tableName, long rowId, Row row) {
+        // Para transacciones implícitas sin snapshot, necesitamos inicializar el snapshot
+        // con los datos actuales de la tabla ANTES de aplicar cambios
+        if (isImplicit && !snapshots.containsKey(tableName)) {
+            Table table = db.getTable(tableName);
+            if (table != null) {
+                // Copiar datos actuales de la tabla al snapshot
+                snapshots.put(tableName, new HashMap<>(table.getData()));
+            } else {
+                snapshots.put(tableName, new HashMap<>());
+            }
+        }
+        
         Map<Long, Row> changes = pendingChanges.computeIfAbsent(tableName, k -> new HashMap<>());
         if (row == null) {
-            changes.remove(rowId);
+            // Marcamos como null para indicar eliminación en el commit
+            changes.put(rowId, null);
         } else {
             // Si rowId es 0, es una nueva inserción - asignar ID único
             if (rowId == 0) {
@@ -318,6 +440,16 @@ public class Transaction implements AutoCloseable {
      * Ejecuta un SELECT dentro de esta transacción, leyendo desde el snapshot + cambios pendientes.
      */
     public List<Row> select(String tableName, List<Filter> filters) throws Exception {
+        // Para transacciones implícitas, inicializar snapshot si no existe
+        if (isImplicit && !snapshots.containsKey(tableName)) {
+            Table table = db.getTable(tableName);
+            if (table != null) {
+                snapshots.put(tableName, new HashMap<>(table.getData()));
+            } else {
+                snapshots.put(tableName, new HashMap<>());
+            }
+        }
+        
         Map<Long, Row> snapshot = snapshots.getOrDefault(tableName, new HashMap<>());
         Map<Long, Row> changes = pendingChanges.getOrDefault(tableName, new HashMap<>());
         
