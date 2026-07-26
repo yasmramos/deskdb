@@ -323,15 +323,14 @@ public class Transaction implements AutoCloseable {
     }
     
     /**
-     * Aplica un cambio pendiente en esta transacción.
+     * Applies a pending change to this transaction.
      */
     public void applyChange(String tableName, long rowId, Row row) {
-        // Para transacciones implícitas sin snapshot, necesitamos inicializar el snapshot
-        // con los datos actuales de la tabla ANTES de aplicar cambios
-        if (isImplicit && !snapshots.containsKey(tableName)) {
+        // Initialize snapshot with current table data if not exists
+        if (!snapshots.containsKey(tableName)) {
             Table table = db.getTable(tableName);
             if (table != null) {
-                // Copiar datos actuales de la tabla al snapshot
+                // Copy current table data to snapshot
                 snapshots.put(tableName, new HashMap<>(table.getData()));
             } else {
                 snapshots.put(tableName, new HashMap<>());
@@ -340,12 +339,20 @@ public class Transaction implements AutoCloseable {
         
         Map<Long, Row> changes = pendingChanges.computeIfAbsent(tableName, k -> new HashMap<>());
         if (row == null) {
-            // Marcamos como null para indicar eliminación en el commit
+            // Mark as null to indicate deletion on commit
             changes.put(rowId, null);
         } else {
-            // Si rowId es 0, es una nueva inserción - asignar ID único
+            // If rowId is 0, it's a new insert - assign unique ID
             if (rowId == 0) {
-                long nextId = nextRowIds.computeIfAbsent(tableName, k -> 1L);
+                long nextId = nextRowIds.computeIfAbsent(tableName, k -> {
+                    // Start from current table size + 1 to avoid conflicts
+                    Table table = db.getTable(tableName);
+                    long startId = 1L;
+                    if (table != null) {
+                        startId = table.getData().size() + 1L;
+                    }
+                    return startId;
+                });
                 Row newRow = new Row(nextId, row.getValues());
                 changes.put(nextId, newRow);
                 nextRowIds.put(tableName, nextId + 1);
