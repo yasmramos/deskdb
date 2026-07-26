@@ -18,6 +18,8 @@ import java.util.concurrent.TimeUnit;
 import com.deskdb.core.DeskDB;
 import com.deskdb.core.Transaction;
 import com.deskdb.core.Row;
+import com.deskdb.core.Column;
+import com.deskdb.core.DataType;
 
 /**
  * Benchmark comparing DeskDB against popular embedded Java databases:
@@ -32,7 +34,7 @@ import com.deskdb.core.Row;
  * - Delete performance
  */
 @State(Scope.Thread)
-@OutputTimeUnit(TimeUnit.MILLISECONDS)
+@OutputTimeUnit(TimeUnit.SECONDS)
 @BenchmarkMode(Mode.Throughput)
 @Warmup(iterations = 3, time = 2)
 @Measurement(iterations = 5, time = 2)
@@ -41,6 +43,22 @@ public class EmbeddedDatabaseBenchmark {
 
     // Test data size
     private static final int BATCH_SIZE = 1000;
+    
+    // ID counter for unique inserts
+    private int currentId = 1;
+    private final Object idLock = new Object();
+    
+    private int getNextId() {
+        synchronized (idLock) {
+            return currentId++;
+        }
+    }
+    
+    private void resetIdCounter() {
+        synchronized (idLock) {
+            currentId = 1;
+        }
+    }
     
     // Database instances
     private DeskDB deskDB;
@@ -63,6 +81,7 @@ public class EmbeddedDatabaseBenchmark {
         deskDBFile = new File(tempDir, "bench_desk_" + System.nanoTime() + ".deskdb");
         try {
             deskDB = DeskDB.open(deskDBFile.getAbsolutePath());
+            setupDeskDBSchema();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -108,6 +127,8 @@ public class EmbeddedDatabaseBenchmark {
         clearH2();
         clearSQLite();
         clearHSQLDB();
+        // Reset ID counter for unique inserts
+        resetIdCounter();
     }
     
     private void cleanupFiles() {
@@ -174,6 +195,17 @@ public class EmbeddedDatabaseBenchmark {
         }
     }
     
+    // Setup DeskDB schema
+    private void setupDeskDBSchema() throws Exception {
+        deskDB.createTable("users",
+            new Column("id", DataType.LONG).primaryKey(),
+            new Column("name", DataType.STRING),
+            new Column("email", DataType.STRING),
+            new Column("age", DataType.INT),
+            new Column("balance", DataType.DOUBLE)
+        );
+    }
+
     // Clear methods
     private void clearDeskDB() {
         try {
@@ -206,11 +238,12 @@ public class EmbeddedDatabaseBenchmark {
     @Benchmark
     public void insertSingle_DeskDB() {
         try {
+            int id = getNextId();
             deskDB.table("users")
                 .insert()
-                .value("id", 1)
-                .value("name", "Test User")
-                .value("email", "test@example.com")
+                .value("id", id)
+                .value("name", "Test User " + id)
+                .value("email", "test" + id + "@example.com")
                 .value("age", 30)
                 .value("balance", 1000.50)
                 .execute();
@@ -262,11 +295,12 @@ public class EmbeddedDatabaseBenchmark {
     public void insertBatch_DeskDB() {
         try (Transaction tx = deskDB.beginTransaction()) {
             for (int i = 0; i < BATCH_SIZE; i++) {
+                int id = getNextId();
                 deskDB.table("users")
                     .insert()
-                    .value("id", i)
-                    .value("name", "User " + i)
-                    .value("email", "user" + i + "@example.com")
+                    .value("id", id)
+                    .value("name", "User " + id)
+                    .value("email", "user" + id + "@example.com")
                     .value("age", 20 + (i % 50))
                     .value("balance", 1000.0 + i * 1.5)
                     .execute();
