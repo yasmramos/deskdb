@@ -14,6 +14,7 @@ public class Table {
     private final Map<String, String> columnToIndex = new HashMap<>();
     private long nextRowId = 1;
     private final Object lock = new Object();
+    private DeskDB db;
 
     public Table(String name, List<Column> columns, String dbPath) throws IOException {
         this.name = name;
@@ -24,6 +25,14 @@ public class Table {
                 createIndex("pk_" + name, col.getName());
             }
         }
+    }
+    
+    public void setDb(DeskDB db) {
+        this.db = db;
+    }
+    
+    public DeskDB getDb() {
+        return db;
     }
 
     public String getName() { return name; }
