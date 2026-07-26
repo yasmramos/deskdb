@@ -33,11 +33,14 @@ public class DeleteBuilder {
         if (filter == null) {
             throw new IllegalStateException("WHERE clause required for delete");
         }
+        
         List<Row> rows;
+        String actualTableName = tableName != null ? tableName : table.getName();
+        
         if (transaction != null) {
-            rows = transaction.select(tableName, Collections.singletonList(filter));
+            rows = transaction.select(actualTableName, java.util.Collections.singletonList(filter));
         } else {
-            rows = table.select(Collections.singletonList(filter));
+            rows = table.select(java.util.Collections.singletonList(filter));
         }
 
         if (rows.isEmpty()) {
@@ -45,16 +48,15 @@ public class DeleteBuilder {
         }
         
         if (transaction != null) {
-            // Usar la transacción proporcionada
+            // Use provided transaction - don't commit automatically
             for (Row row : rows) {
-                transaction.applyChange(tableName, row.getRowId(), null);
+                transaction.applyChange(actualTableName, row.getRowId(), null);
             }
-            // No hacer commit aquí - el usuario debe hacerlo explícitamente
         } else {
-            // Auto-commit: crear transacción implícita para toda la operación
+            // Auto-commit: create implicit transaction for the entire operation
             try (Transaction autoTx = table.getDb().beginTransaction()) {
                 for (Row row : rows) {
-                    autoTx.applyChange(tableName, row.getRowId(), null);
+                    autoTx.applyChange(table.getName(), row.getRowId(), null);
                 }
                 autoTx.commit();
             }
