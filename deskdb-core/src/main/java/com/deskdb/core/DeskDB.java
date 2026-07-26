@@ -188,11 +188,19 @@ public class DeskDB implements AutoCloseable {
      */
     public void close() throws IOException {
         if (!closed) {
-            // Cerrar WAL antes de guardar
+            // Save data to file first
+            saveToFile();
+            
+            // Close and truncate WAL since data is now persisted
             if (wal != null) {
                 wal.close();
+                // Truncate WAL file after successful persistence
+                try {
+                    java.nio.file.Files.deleteIfExists(wal.getWalPath());
+                } catch (Exception e) {
+                    logger.warn("Could not delete WAL file: {}", e.getMessage());
+                }
             }
-            saveToFile();
             closed = true;
             logger.info("DeskDB closed at {}", dbPath.toAbsolutePath());
         }
