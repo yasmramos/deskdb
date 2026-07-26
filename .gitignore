@@ -1,5 +1,5 @@
 ```
-# Compiled and binary files
+# Compiled and build artifacts
 *.class
 *.o
 *.obj
@@ -10,43 +10,18 @@
 *.out
 
 # Dependencies
-lib/
-libs/
-dependencies/
-
-# Build artifacts
 target/
-build/
-dist/
-out/
-
-# Java specific
-*.jar
-*.war
-*.ear
-META-INF/
-
-# IDE files
-.vscode/
-.idea/
-*.iml
-*.ipr
-*.iws
-*.swp
-*.swo
+.gradle/
 
 # Logs and temp files
 *.log
 *.tmp
-*.temp
-*.cache
+*.swp
 
-# System files
-.DS_Store
-Thumbs.db
+# Editors
+.vscode/
+.idea/
 
-# Environment
-.env
-.env.local
-*.env.*
+# Database WAL files
+*.wal
 ```
