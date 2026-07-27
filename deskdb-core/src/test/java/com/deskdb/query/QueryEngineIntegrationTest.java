@@ -83,8 +83,33 @@ public class QueryEngineIntegrationTest {
     class QueryOptimizerTests {
         
         @BeforeEach
-        void setUp() {
-            // Ensure parent setUp has run - db and table are inherited
+        void setUp() throws Exception {
+            // Re-initialize for nested test class
+            if (db == null || db.isClosed()) {
+                tempDbPath = Files.createTempFile("query_test", ".deskdb");
+                db = DeskDB.open(tempDbPath);
+                db.createTable("products",
+                    new Column("id", DataType.LONG).primaryKey(),
+                    new Column("name", DataType.STRING),
+                    new Column("price", DataType.DOUBLE),
+                    new Column("quantity", DataType.INT),
+                    new Column("category", DataType.STRING),
+                    new Column("active", DataType.BOOLEAN)
+                );
+                table = db.getTable("products");
+                insertProduct(1L, "Laptop", 999.99, 50, "Electronics", true);
+                insertProduct(2L, "Mouse", 29.99, 200, "Electronics", true);
+                insertProduct(3L, "Keyboard", 79.99, 150, "Electronics", true);
+                insertProduct(4L, "Monitor", 299.99, 75, "Electronics", false);
+                insertProduct(5L, "Desk", 199.99, 30, "Furniture", true);
+                insertProduct(6L, "Chair", 149.99, 45, "Furniture", true);
+                insertProduct(7L, "Headphones", 89.99, 100, "Electronics", true);
+                insertProduct(8L, "Webcam", 59.99, 80, "Electronics", false);
+                insertProduct(9L, "Bookshelf", 129.99, 20, "Furniture", true);
+                insertProduct(10L, "Lamp", 39.99, 60, "Furniture", true);
+                insertProduct(11L, "Clean Code", 45.99, 100, "Books", true);
+                insertProduct(12L, "Design Patterns", 54.99, 75, "Books", false);
+            }
             assertNotNull(db, "Database should be initialized");
             assertNotNull(table, "Table should be initialized");
         }
@@ -198,6 +223,38 @@ public class QueryEngineIntegrationTest {
     @DisplayName("QueryPlan Tests")
     class QueryPlanTests {
         
+        @BeforeEach
+        void setUp() throws Exception {
+            // Re-initialize for nested test class
+            if (db == null || db.isClosed()) {
+                tempDbPath = Files.createTempFile("query_test", ".deskdb");
+                db = DeskDB.open(tempDbPath);
+                db.createTable("products",
+                    new Column("id", DataType.LONG).primaryKey(),
+                    new Column("name", DataType.STRING),
+                    new Column("price", DataType.DOUBLE),
+                    new Column("quantity", DataType.INT),
+                    new Column("category", DataType.STRING),
+                    new Column("active", DataType.BOOLEAN)
+                );
+                table = db.getTable("products");
+                insertProduct(1L, "Laptop", 999.99, 50, "Electronics", true);
+                insertProduct(2L, "Mouse", 29.99, 200, "Electronics", true);
+                insertProduct(3L, "Keyboard", 79.99, 150, "Electronics", true);
+                insertProduct(4L, "Monitor", 299.99, 75, "Electronics", false);
+                insertProduct(5L, "Desk", 199.99, 30, "Furniture", true);
+                insertProduct(6L, "Chair", 149.99, 45, "Furniture", true);
+                insertProduct(7L, "Headphones", 89.99, 100, "Electronics", true);
+                insertProduct(8L, "Webcam", 59.99, 80, "Electronics", false);
+                insertProduct(9L, "Bookshelf", 129.99, 20, "Furniture", true);
+                insertProduct(10L, "Lamp", 39.99, 60, "Furniture", true);
+                insertProduct(11L, "Clean Code", 45.99, 100, "Books", true);
+                insertProduct(12L, "Design Patterns", 54.99, 75, "Books", false);
+            }
+            assertNotNull(db, "Database should be initialized");
+            assertNotNull(table, "Table should be initialized");
+        }
+        
         @Test
         @DisplayName("Should create QueryPlan with index")
         void testQueryPlanWithIndex() throws Exception {
@@ -259,6 +316,38 @@ public class QueryEngineIntegrationTest {
     @Nested
     @DisplayName("SelectBuilder Integration Tests")
     class SelectBuilderIntegrationTests {
+        
+        @BeforeEach
+        void setUp() throws Exception {
+            // Re-initialize for nested test class
+            if (db == null || db.isClosed()) {
+                tempDbPath = Files.createTempFile("query_test", ".deskdb");
+                db = DeskDB.open(tempDbPath);
+                db.createTable("products",
+                    new Column("id", DataType.LONG).primaryKey(),
+                    new Column("name", DataType.STRING),
+                    new Column("price", DataType.DOUBLE),
+                    new Column("quantity", DataType.INT),
+                    new Column("category", DataType.STRING),
+                    new Column("active", DataType.BOOLEAN)
+                );
+                table = db.getTable("products");
+                insertProduct(1L, "Laptop", 999.99, 50, "Electronics", true);
+                insertProduct(2L, "Mouse", 29.99, 200, "Electronics", true);
+                insertProduct(3L, "Keyboard", 79.99, 150, "Electronics", true);
+                insertProduct(4L, "Monitor", 299.99, 75, "Electronics", false);
+                insertProduct(5L, "Desk", 199.99, 30, "Furniture", true);
+                insertProduct(6L, "Chair", 149.99, 45, "Furniture", true);
+                insertProduct(7L, "Headphones", 89.99, 100, "Electronics", true);
+                insertProduct(8L, "Webcam", 59.99, 80, "Electronics", false);
+                insertProduct(9L, "Bookshelf", 129.99, 20, "Furniture", true);
+                insertProduct(10L, "Lamp", 39.99, 60, "Furniture", true);
+                insertProduct(11L, "Clean Code", 45.99, 100, "Books", true);
+                insertProduct(12L, "Design Patterns", 54.99, 75, "Books", false);
+            }
+            assertNotNull(db, "Database should be initialized");
+            assertNotNull(table, "Table should be initialized");
+        }
         
         @Test
         @DisplayName("Should execute select with single filter")
@@ -528,6 +617,38 @@ public class QueryEngineIntegrationTest {
     @DisplayName("Complex Query Scenarios")
     class ComplexQueryScenarios {
         
+        @BeforeEach
+        void setUp() throws Exception {
+            // Re-initialize for nested test class
+            if (db == null || db.isClosed()) {
+                tempDbPath = Files.createTempFile("query_test", ".deskdb");
+                db = DeskDB.open(tempDbPath);
+                db.createTable("products",
+                    new Column("id", DataType.LONG).primaryKey(),
+                    new Column("name", DataType.STRING),
+                    new Column("price", DataType.DOUBLE),
+                    new Column("quantity", DataType.INT),
+                    new Column("category", DataType.STRING),
+                    new Column("active", DataType.BOOLEAN)
+                );
+                table = db.getTable("products");
+                insertProduct(1L, "Laptop", 999.99, 50, "Electronics", true);
+                insertProduct(2L, "Mouse", 29.99, 200, "Electronics", true);
+                insertProduct(3L, "Keyboard", 79.99, 150, "Electronics", true);
+                insertProduct(4L, "Monitor", 299.99, 75, "Electronics", false);
+                insertProduct(5L, "Desk", 199.99, 30, "Furniture", true);
+                insertProduct(6L, "Chair", 149.99, 45, "Furniture", true);
+                insertProduct(7L, "Headphones", 89.99, 100, "Electronics", true);
+                insertProduct(8L, "Webcam", 59.99, 80, "Electronics", false);
+                insertProduct(9L, "Bookshelf", 129.99, 20, "Furniture", true);
+                insertProduct(10L, "Lamp", 39.99, 60, "Furniture", true);
+                insertProduct(11L, "Clean Code", 45.99, 100, "Books", true);
+                insertProduct(12L, "Design Patterns", 54.99, 75, "Books", false);
+            }
+            assertNotNull(db, "Database should be initialized");
+            assertNotNull(table, "Table should be initialized");
+        }
+        
         @Test
         @DisplayName("Should handle compound filters with AND/OR logic")
         void testCompoundFilters() throws Exception {
@@ -606,6 +727,38 @@ public class QueryEngineIntegrationTest {
     @Nested
     @DisplayName("WhereCondition Tests - Testing andWhere() for multiple conditions")
     class WhereConditionTests {
+        
+        @BeforeEach
+        void setUp() throws Exception {
+            // Re-initialize for nested test class
+            if (db == null || db.isClosed()) {
+                tempDbPath = Files.createTempFile("query_test", ".deskdb");
+                db = DeskDB.open(tempDbPath);
+                db.createTable("products",
+                    new Column("id", DataType.LONG).primaryKey(),
+                    new Column("name", DataType.STRING),
+                    new Column("price", DataType.DOUBLE),
+                    new Column("quantity", DataType.INT),
+                    new Column("category", DataType.STRING),
+                    new Column("active", DataType.BOOLEAN)
+                );
+                table = db.getTable("products");
+                insertProduct(1L, "Laptop", 999.99, 50, "Electronics", true);
+                insertProduct(2L, "Mouse", 29.99, 200, "Electronics", true);
+                insertProduct(3L, "Keyboard", 79.99, 150, "Electronics", true);
+                insertProduct(4L, "Monitor", 299.99, 75, "Electronics", false);
+                insertProduct(5L, "Desk", 199.99, 30, "Furniture", true);
+                insertProduct(6L, "Chair", 149.99, 45, "Furniture", true);
+                insertProduct(7L, "Headphones", 89.99, 100, "Electronics", true);
+                insertProduct(8L, "Webcam", 59.99, 80, "Electronics", false);
+                insertProduct(9L, "Bookshelf", 129.99, 20, "Furniture", true);
+                insertProduct(10L, "Lamp", 39.99, 60, "Furniture", true);
+                insertProduct(11L, "Clean Code", 45.99, 100, "Books", true);
+                insertProduct(12L, "Design Patterns", 54.99, 75, "Books", false);
+            }
+            assertNotNull(db, "Database should be initialized");
+            assertNotNull(table, "Table should be initialized");
+        }
         
         @Test
         @DisplayName("Test andWhere() with multiple conditions using EQ")
