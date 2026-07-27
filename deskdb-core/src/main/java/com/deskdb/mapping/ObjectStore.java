@@ -32,6 +32,9 @@ public class ObjectStore {
     
     private final DeskDB db;
 
+    // Flag to indicate if this is an in-memory only instance (no disk persistence)
+    private final boolean inMemoryOnly;
+
     /**
      * Creates an ObjectStore integrated with DeskDB.
      * Objects are stored in the same .deskdb file using an internal table.
@@ -39,9 +42,22 @@ public class ObjectStore {
      * @param db The DeskDB instance to use for storage
      */
     public ObjectStore(DeskDB db) {
+        this(db, false);
+    }
+
+    /**
+     * Creates an ObjectStore integrated with DeskDB.
+     * 
+     * @param db The DeskDB instance to use for storage
+     * @param inMemoryOnly If true, data is kept only in memory without disk persistence
+     */
+    public ObjectStore(DeskDB db, boolean inMemoryOnly) {
         this.db = db;
+        this.inMemoryOnly = inMemoryOnly;
         this.inMemoryCache = new ConcurrentHashMap<>();
-        initializeInternalTable();
+        if (!inMemoryOnly) {
+            initializeInternalTable();
+        }
     }
 
     /**

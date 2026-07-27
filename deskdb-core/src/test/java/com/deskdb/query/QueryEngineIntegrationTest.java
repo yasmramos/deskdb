@@ -82,6 +82,13 @@ public class QueryEngineIntegrationTest {
     @DisplayName("Query Optimizer Tests")
     class QueryOptimizerTests {
         
+        @BeforeEach
+        void setUp() {
+            // Ensure parent setUp has run - db and table are inherited
+            assertNotNull(db, "Database should be initialized");
+            assertNotNull(table, "Table should be initialized");
+        }
+        
         @Test
         @DisplayName("Should use full scan when no filters are provided")
         void testOptimizeWithNoFilters() {
