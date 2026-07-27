@@ -312,7 +312,7 @@ public class Transaction implements AutoCloseable {
         
         lock.writeLock().lock();
         try {
-            // Escribir ROLLBACK en WAL
+            // Write ROLLBACK to WAL
             if (wal != null) {
                 try {
                     wal.writeRollback(transactionId);
@@ -321,9 +321,11 @@ public class Transaction implements AutoCloseable {
                 }
             }
             
+            // Clear all pending changes to discard them
+            pendingChanges.clear();
+            snapshots.clear();
+            
             active = false;
-            // NO restaurar snapshots - los commits son atómicos y persistentes
-            // El rollback solo descarta cambios pendientes de esta transacción
             logger.info("Transaction {} rolled back", transactionId);
         } finally {
             lock.writeLock().unlock();

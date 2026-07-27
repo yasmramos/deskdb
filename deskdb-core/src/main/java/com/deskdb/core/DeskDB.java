@@ -221,18 +221,37 @@ public class DeskDB implements AutoCloseable {
      * @return Transacción para realizar operaciones atómicas
      */
     public Transaction beginTransaction() throws IOException {
+        return beginTransaction(false);
+    }
+    
+    /**
+     * Starts a new transaction with explicit commit/rollback control.
+     * 
+     * @param autoCommit if true, changes are committed automatically (implicit transaction)
+     *                   if false, user must explicitly call commit() or rollback()
+     * @return Transaction for performing atomic operations
+     * @throws IOException if database is closed
+     */
+    public Transaction beginTransaction(boolean autoCommit) throws IOException {
         checkClosed();
         
-        // Si ya hay una transacción activa en este hilo, la retornamos para evitar anidamiento
-        Transaction existingTx = currentTransaction.get();
-        if (existingTx != null) {
-            logger.debug("Reusing existing transaction in thread {}", Thread.currentThread().getName());
-            return existingTx;
+        // For explicit transactions (autoCommit=false), don't reuse existing transactions
+        // This allows multiple explicit transactions to run concurrently for isolation testing
+        if (autoCommit) {
+            // If there's already an active implicit transaction in this thread, return it to avoid nesting
+            Transaction existingTx = currentTransaction.get();
+            if (existingTx != null) {
+                logger.debug("Reusing existing transaction in thread {}", Thread.currentThread().getName());
+                return existingTx;
+            }
         }
         
-        Transaction tx = new Transaction(this);
-        currentTransaction.set(tx);
-        logger.debug("Started new transaction {} in thread {}", transactionCounter.incrementAndGet(), Thread.currentThread().getName());
+        Transaction tx = new Transaction(this, !autoCommit);
+        if (!autoCommit) {
+            currentTransaction.set(tx);
+        }
+        logger.debug("Started new transaction {} in thread {} (autoCommit={})", 
+            transactionCounter.incrementAndGet(), Thread.currentThread().getName(), autoCommit);
         return tx;
     }
     
