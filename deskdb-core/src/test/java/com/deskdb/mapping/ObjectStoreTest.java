@@ -1,10 +1,13 @@
 package com.deskdb.mapping;
 
+import com.deskdb.core.DeskDB;
 import com.deskdb.mapping.annotations.Id;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.Serializable;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -15,10 +18,14 @@ import static org.junit.jupiter.api.Assertions.*;
 public class ObjectStoreTest {
 
     private ObjectStore objectStore;
+    private DeskDB db;
+    private Path tempDbPath;
 
     @BeforeEach
-    public void setUp() {
-        objectStore = new ObjectStore();
+    public void setUp() throws Exception {
+        tempDbPath = Files.createTempFile("test", ".deskdb");
+        db = DeskDB.open(tempDbPath);
+        objectStore = new ObjectStore(db);
     }
 
     @Test

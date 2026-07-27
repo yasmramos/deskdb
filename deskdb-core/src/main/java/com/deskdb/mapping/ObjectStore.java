@@ -50,7 +50,10 @@ public class ObjectStore {
     private void initializeInternalTable() {
         try {
             // Check if table exists by trying to get it
-            if (db.getTable(INTERNAL_TABLE_NAME) == null) {
+            try {
+                db.getTable(INTERNAL_TABLE_NAME);
+                // Table already exists, nothing to do
+            } catch (IllegalStateException e) {
                 // Table doesn't exist, create it
                 // Use BLOB for binary data storage
                 db.createTable(INTERNAL_TABLE_NAME,
@@ -176,14 +179,22 @@ public class ObjectStore {
         String typeName = clazz.getName();
         
         try {
-            // Combine both conditions into a single filter using AND logic
-            Filter idFilter = new Filter("id", Filter.Operator.EQ, id instanceof Integer ? ((Integer) id).longValue() : id);
-            Filter classFilter = new Filter("class_name", Filter.Operator.EQ, typeName);
-            Filter combinedFilter = new Filter(idFilter, classFilter); // AND combination
+            // First, find the row that matches both conditions
+            var results = db.table(INTERNAL_TABLE_NAME)
+                .select()
+                .where("id").eq(id instanceof Integer ? ((Integer) id).longValue() : id)
+                .and("class_name").eq(typeName)
+                .execute();
             
+            if (results.isEmpty()) {
+                return false;
+            }
+            
+            // Delete by row ID
+            Object rowId = results.get(0).getRowId();
             int affected = db.table(INTERNAL_TABLE_NAME)
                 .delete()
-                .whereCond("id").eq(id instanceof Integer ? ((Integer) id).longValue() : id)
+                .where("id").eq(rowId)
                 .execute();
             
             if (affected > 0) {
@@ -232,12 +243,23 @@ public class ObjectStore {
         try {
             byte[] data = serialize(entity);
             
-            // Update in database
+            // First find the row by both id and class_name
+            var results = db.table(INTERNAL_TABLE_NAME)
+                .select()
+                .where("id").eq(id instanceof Integer ? ((Integer) id).longValue() : id)
+                .and("class_name").eq(typeName)
+                .execute();
+            
+            if (results.isEmpty()) {
+                throw new RuntimeException("Entity not found for update");
+            }
+            
+            // Update by row ID
+            Object rowId = results.get(0).getRowId();
             db.table(INTERNAL_TABLE_NAME)
                 .update()
                 .set("data", data)
-                .where("id").eq(id)
-                .and("class_name").eq(typeName)
+                .where("id").eq(rowId)
                 .execute();
             
             // Update cache
@@ -252,7 +274,20 @@ public class ObjectStore {
      */
     public void clear() {
         try {
-            db.table(INTERNAL_TABLE_NAME).delete().execute();
+            // Select all rows first
+            var allRows = db.table(INTERNAL_TABLE_NAME)
+                .select()
+                .execute();
+            
+            // Delete each row by ID
+            for (var row : allRows) {
+                Object rowId = row.getRowId();
+                db.table(INTERNAL_TABLE_NAME)
+                    .delete()
+                    .where("id").eq(rowId)
+                    .execute();
+            }
+            
             inMemoryCache.clear();
             idGenerators.clear();
         } catch (Exception e) {
@@ -294,19 +329,19 @@ public class ObjectStore {
             byte[] data = serialize(entity);
             
             // Check if entity with this ID already exists
-            List<Map<String, Object>> existing = db.table(INTERNAL_TABLE_NAME)
+            var existing = db.table(INTERNAL_TABLE_NAME)
                 .select()
                 .where("id").eq(id instanceof Integer ? ((Integer) id).longValue() : id)
                 .and("class_name").eq(typeName)
                 .execute();
             
             if (!existing.isEmpty()) {
-                // Update existing
+                // Update existing - get row ID first
+                Object rowId = existing.get(0).getRowId();
                 db.table(INTERNAL_TABLE_NAME)
                     .update()
                     .set("data", data)
-                    .where("id").eq(id instanceof Integer ? ((Integer) id).longValue() : id)
-                    .and("class_name").eq(typeName)
+                    .where("id").eq(rowId)
                     .execute();
             } else {
                 // Insert new
