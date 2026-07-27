@@ -1,53 +1,67 @@
 package com.deskdb.mapping;
 
-import java.io.*;
-import java.nio.file.*;
-import java.util.*;
+import com.deskdb.core.DeskDB;
+import com.deskdb.core.DataType;
+import com.deskdb.mapping.annotations.Id;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.ObjectOutputStream;
+import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * ObjectStore provides object persistence for Java objects using serialization.
+ * ObjectStore provides object persistence for Java objects integrated into DeskDB.
  * <p>
- * Supports two modes:
- * <ul>
- *   <li><b>Disk-backed:</b> When created with a database file path, data persists across sessions.</li>
- *   <li><b>In-memory only:</b> When created with the no-arg constructor, data lives only in RAM.</li>
- * </ul>
+ * Objects are stored in an internal table within the same .deskdb file,
+ * sharing the same WAL and transaction management for ACID guarantees.
  * </p>
  */
 public class ObjectStore {
 
-    private static final String STORE_FILE_SUFFIX = ".objdb";
+    private static final String INTERNAL_TABLE_NAME = "_obj_store";
     
-    private final Map<String, Map<Object, byte[]>> inMemoryStore;
+    // In-memory cache for fast access
+    private final Map<String, Map<Object, Object>> inMemoryCache;
     
     // ID generators per class type
     private final Map<String, Long> idGenerators = new ConcurrentHashMap<>();
     
-    private final Path storagePath;
-    private final boolean inMemoryOnly;
+    private final DeskDB db;
 
     /**
-     * Creates an ObjectStore backed by a file on disk.
-     * Data will be persisted to a sibling file with .objdb extension.
+     * Creates an ObjectStore integrated with DeskDB.
+     * Objects are stored in the same .deskdb file using an internal table.
      * 
-     * @param dbFilePath Path to the main database file
+     * @param db The DeskDB instance to use for storage
      */
-    public ObjectStore(Path dbFilePath) {
-        this.inMemoryStore = new ConcurrentHashMap<>();
-        this.inMemoryOnly = false;
-        this.storagePath = Paths.get(dbFilePath.toString() + STORE_FILE_SUFFIX);
-        loadFromDisk();
+    public ObjectStore(DeskDB db) {
+        this.db = db;
+        this.inMemoryCache = new ConcurrentHashMap<>();
+        initializeInternalTable();
     }
-    
+
     /**
-     * Creates an in-memory only ObjectStore.
-     * Data will be lost when the instance is garbage collected or the JVM exits.
+     * Initializes the internal object store table if it doesn't exist.
      */
-    public ObjectStore() {
-        this.inMemoryStore = new ConcurrentHashMap<>();
-        this.inMemoryOnly = true;
-        this.storagePath = null;
+    private void initializeInternalTable() {
+        try {
+            // Check if table exists by trying to get it
+            if (db.getTable(INTERNAL_TABLE_NAME) == null) {
+                // Table doesn't exist, create it
+                // Use BLOB for binary data storage
+                db.createTable(INTERNAL_TABLE_NAME,
+                    new com.deskdb.core.Column("id", DataType.LONG).primaryKey(),
+                    new com.deskdb.core.Column("class_name", DataType.STRING),
+                    new com.deskdb.core.Column("data", DataType.BLOB)
+                );
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to initialize internal object store table", e);
+        }
     }
 
     /**
@@ -85,7 +99,37 @@ public class ObjectStore {
     @SuppressWarnings("unchecked")
     public <T> T find(Class<T> clazz, Object id) {
         String typeName = clazz.getName();
-        return (T) retrieve(typeName, id);
+        
+        // Check cache first
+        Map<Object, Object> typeCache = inMemoryCache.get(typeName);
+        if (typeCache != null && typeCache.containsKey(id)) {
+            return (T) typeCache.get(id);
+        }
+        
+        // Query from database
+        try {
+            var results = db.table(INTERNAL_TABLE_NAME)
+                .select()
+                .where("id").eq(id)
+                .and("class_name").eq(typeName)
+                .execute();
+            
+            if (!results.isEmpty()) {
+                var row = results.get(0);
+                byte[] data = (byte[]) row.get("data");
+                T entity = deserialize(data, clazz);
+                if (entity != null) {
+                    setIdOnEntity(entity, id);
+                    // Cache it
+                    inMemoryCache.computeIfAbsent(typeName, k -> new ConcurrentHashMap<>()).put(id, entity);
+                    return entity;
+                }
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to find entity", e);
+        }
+        
+        return null;
     }
 
     /**
@@ -96,21 +140,29 @@ public class ObjectStore {
     @SuppressWarnings("unchecked")
     public <T> List<T> findAll(Class<T> clazz) {
         String typeName = clazz.getName();
-        Map<Object, byte[]> typeStore = inMemoryStore.get(typeName);
-        
-        if (typeStore == null || typeStore.isEmpty()) {
-            return new ArrayList<>();
-        }
-        
         List<T> entities = new ArrayList<>();
-        for (Map.Entry<Object, byte[]> entry : typeStore.entrySet()) {
-            T entity = deserialize(entry.getValue());
-            if (entity != null) {
-                // Set the ID on the entity
-                setIdOnEntity(entity, entry.getKey());
-                entities.add(entity);
+        
+        try {
+            var results = db.table(INTERNAL_TABLE_NAME)
+                .select()
+                .where("class_name").eq(typeName)
+                .execute();
+            
+            for (var row : results) {
+                Object id = row.get("id");
+                byte[] data = (byte[]) row.get("data");
+                T entity = deserialize(data, clazz);
+                if (entity != null) {
+                    setIdOnEntity(entity, id);
+                    entities.add(entity);
+                    // Cache it
+                    inMemoryCache.computeIfAbsent(typeName, k -> new ConcurrentHashMap<>()).put(id, entity);
+                }
             }
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to find all entities", e);
         }
+        
         return entities;
     }
 
@@ -122,17 +174,31 @@ public class ObjectStore {
      */
     public <T> boolean remove(Class<T> clazz, Object id) {
         String typeName = clazz.getName();
-        Map<Object, byte[]> typeStore = inMemoryStore.get(typeName);
         
-        if (typeStore == null) {
-            return false;
+        try {
+            // Combine both conditions into a single filter using AND logic
+            Filter idFilter = new Filter("id", Filter.Operator.EQ, id instanceof Integer ? ((Integer) id).longValue() : id);
+            Filter classFilter = new Filter("class_name", Filter.Operator.EQ, typeName);
+            Filter combinedFilter = new Filter(idFilter, classFilter); // AND combination
+            
+            int affected = db.table(INTERNAL_TABLE_NAME)
+                .delete()
+                .whereCond("id").eq(id instanceof Integer ? ((Integer) id).longValue() : id)
+                .execute();
+            
+            if (affected > 0) {
+                // Remove from cache
+                Map<Object, Object> typeCache = inMemoryCache.get(typeName);
+                if (typeCache != null) {
+                    typeCache.remove(id);
+                }
+                return true;
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to remove entity", e);
         }
         
-        boolean removed = typeStore.remove(id) != null;
-        if (removed && !inMemoryOnly) {
-            saveToDisk();
-        }
-        return removed;
+        return false;
     }
 
     /**
@@ -160,17 +226,37 @@ public class ObjectStore {
         if (id == null) {
             throw new IllegalArgumentException("Entity must have an ID to update");
         }
-        persist(entity, id);
+        
+        String typeName = entity.getClass().getName();
+        
+        try {
+            byte[] data = serialize(entity);
+            
+            // Update in database
+            db.table(INTERNAL_TABLE_NAME)
+                .update()
+                .set("data", data)
+                .where("id").eq(id)
+                .and("class_name").eq(typeName)
+                .execute();
+            
+            // Update cache
+            inMemoryCache.computeIfAbsent(typeName, k -> new ConcurrentHashMap<>()).put(id, entity);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to update entity", e);
+        }
     }
 
     /**
      * Clears all stored data.
      */
     public void clear() {
-        inMemoryStore.clear();
-        idGenerators.clear();
-        if (!inMemoryOnly) {
-            saveToDisk();
+        try {
+            db.table(INTERNAL_TABLE_NAME).delete().execute();
+            inMemoryCache.clear();
+            idGenerators.clear();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to clear object store", e);
         }
     }
 
@@ -180,41 +266,63 @@ public class ObjectStore {
      */
     public <T> void clear(Class<T> clazz) {
         String typeName = clazz.getName();
-        inMemoryStore.remove(typeName);
-        idGenerators.remove(typeName);
-        if (!inMemoryOnly) {
-            saveToDisk();
+        try {
+            db.table(INTERNAL_TABLE_NAME)
+                .delete()
+                .where("class_name").eq(typeName)
+                .execute();
+            
+            inMemoryCache.remove(typeName);
+            idGenerators.remove(typeName);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to clear object store for type", e);
         }
     }
     
     /**
-     * Closes the store and persists data if not in-memory only.
+     * Closes the store and clears the cache.
      */
     public void close() {
-        if (!inMemoryOnly) {
-            saveToDisk();
-        }
-        inMemoryStore.clear();
+        inMemoryCache.clear();
         idGenerators.clear();
     }
 
     // Private helper methods
 
     private <T> void store(String typeName, Object id, T entity) {
-        byte[] data = serialize(entity);
-        inMemoryStore.computeIfAbsent(typeName, k -> new ConcurrentHashMap<>()).put(id, data);
-        if (!inMemoryOnly) {
-            saveToDisk();
+        try {
+            byte[] data = serialize(entity);
+            
+            // Check if entity with this ID already exists
+            List<Map<String, Object>> existing = db.table(INTERNAL_TABLE_NAME)
+                .select()
+                .where("id").eq(id instanceof Integer ? ((Integer) id).longValue() : id)
+                .and("class_name").eq(typeName)
+                .execute();
+            
+            if (!existing.isEmpty()) {
+                // Update existing
+                db.table(INTERNAL_TABLE_NAME)
+                    .update()
+                    .set("data", data)
+                    .where("id").eq(id instanceof Integer ? ((Integer) id).longValue() : id)
+                    .and("class_name").eq(typeName)
+                    .execute();
+            } else {
+                // Insert new
+                db.table(INTERNAL_TABLE_NAME)
+                    .insert()
+                    .value("id", id instanceof Integer ? ((Integer) id).longValue() : id)
+                    .value("class_name", typeName)
+                    .value("data", data)
+                    .execute();
+            }
+            
+            // Update cache
+            inMemoryCache.computeIfAbsent(typeName, k -> new ConcurrentHashMap<>()).put(id, entity);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to store entity", e);
         }
-    }
-
-    private Object retrieve(String typeName, Object id) {
-        Map<Object, byte[]> typeStore = inMemoryStore.get(typeName);
-        if (typeStore == null) {
-            return null;
-        }
-        byte[] data = typeStore.get(id);
-        return data != null ? deserialize(data) : null;
     }
 
     private byte[] serialize(Object obj) {
@@ -228,9 +336,9 @@ public class ObjectStore {
     }
 
     @SuppressWarnings("unchecked")
-    private <T> T deserialize(byte[] data) {
-        try (ByteArrayInputStream bais = new ByteArrayInputStream(data);
-             ObjectInputStream ois = new ObjectInputStream(bais)) {
+    private <T> T deserialize(byte[] data, Class<T> clazz) {
+        try (java.io.ByteArrayInputStream bais = new java.io.ByteArrayInputStream(data);
+             java.io.ObjectInputStream ois = new java.io.ObjectInputStream(bais)) {
             return (T) ois.readObject();
         } catch (IOException | ClassNotFoundException e) {
             throw new RuntimeException("Failed to deserialize object", e);
@@ -243,7 +351,7 @@ public class ObjectStore {
 
     private <T> void setIdOnEntity(T entity, Object id) {
         try {
-            java.lang.reflect.Field idField = getIdField(entity.getClass());
+            Field idField = getIdField(entity.getClass());
             if (idField != null) {
                 idField.setAccessible(true);
                 
@@ -261,7 +369,7 @@ public class ObjectStore {
 
     private Object getIdFromEntity(Object entity) {
         try {
-            java.lang.reflect.Field idField = getIdField(entity.getClass());
+            Field idField = getIdField(entity.getClass());
             if (idField != null) {
                 idField.setAccessible(true);
                 return idField.get(entity);
@@ -272,9 +380,9 @@ public class ObjectStore {
         return null;
     }
 
-    private java.lang.reflect.Field getIdField(Class<?> clazz) {
-        for (java.lang.reflect.Field field : clazz.getDeclaredFields()) {
-            if (field.isAnnotationPresent(com.deskdb.mapping.annotations.Id.class)) {
+    private Field getIdField(Class<?> clazz) {
+        for (Field field : clazz.getDeclaredFields()) {
+            if (field.isAnnotationPresent(Id.class)) {
                 return field;
             }
         }
@@ -283,42 +391,6 @@ public class ObjectStore {
             return clazz.getDeclaredField("id");
         } catch (NoSuchFieldException e) {
             return null;
-        }
-    }
-    
-    private synchronized void saveToDisk() {
-        if (inMemoryOnly || storagePath == null) return;
-        
-        try {
-            Files.createDirectories(storagePath.getParent());
-            try (ObjectOutputStream oos = new ObjectOutputStream(Files.newOutputStream(storagePath))) {
-                // Write ID Generators
-                oos.writeObject(idGenerators);
-                // Write Data
-                oos.writeObject(inMemoryStore);
-            }
-        } catch (IOException e) {
-            System.err.println("Failed to save ObjectStore to disk: " + e.getMessage());
-        }
-    }
-    
-    @SuppressWarnings("unchecked")
-    private synchronized void loadFromDisk() {
-        if (inMemoryOnly || storagePath == null || !Files.exists(storagePath)) return;
-        
-        try (ObjectInputStream ois = new ObjectInputStream(Files.newInputStream(storagePath))) {
-            // Read ID Generators
-            Object genObj = ois.readObject();
-            if (genObj instanceof Map) {
-                idGenerators.putAll((Map<String, Long>) genObj);
-            }
-            // Read Data
-            Object dataObj = ois.readObject();
-            if (dataObj instanceof Map) {
-                inMemoryStore.putAll((Map<String, Map<Object, byte[]>>) dataObj);
-            }
-        } catch (IOException | ClassNotFoundException e) {
-            System.out.println("Failed to load ObjectStore from disk (starting fresh): " + e.getMessage());
         }
     }
 }
