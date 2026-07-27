@@ -35,6 +35,7 @@ public class DeskDB implements AutoCloseable {
     private final Map<String, Table> tables;
     private final Map<String, TableSchema> schemas;
     private final Map<String, Map<String, BTree<?, ?>>> indexes; // tableName -> indexName -> BTree
+    private final ObjectStore objectStore; // Single shared instance for object persistence
     private Wal wal;
     private boolean closed = false;
     private final AtomicInteger transactionCounter = new AtomicInteger(0);
@@ -48,6 +49,7 @@ public class DeskDB implements AutoCloseable {
         this.tables = new ConcurrentHashMap<>();
         this.schemas = new HashMap<>();
         this.indexes = new ConcurrentHashMap<>();
+        this.objectStore = new ObjectStore(); // Initialize shared ObjectStore
         
         // Determinar ruta del WAL (mismo directorio que el archivo .deskdb)
         Path walPath = dbPath.resolveSibling(dbPath.getFileName().toString() + ".wal");
@@ -314,6 +316,91 @@ public class DeskDB implements AutoCloseable {
     public ObjectStore createObjectStore() {
         checkClosed();
         return new ObjectStore();
+    }
+
+    /**
+     * Finds an entity by its ID using the ObjectStore.
+     * This is a convenience method that delegates to ObjectStore.find().
+     *
+     * @param clazz The entity class
+     * @param id The ID to search for
+     * @return The entity or null if not found
+     */
+    public <T> T find(Class<T> clazz, Object id) {
+        checkClosed();
+        return objectStore.find(clazz, id);
+    }
+
+    /**
+     * Persists an entity using the ObjectStore.
+     * This is a convenience method that delegates to ObjectStore.persist().
+     *
+     * @param entity The entity to persist
+     * @return The generated ID
+     */
+    public <T> Object persist(T entity) {
+        checkClosed();
+        return objectStore.persist(entity);
+    }
+
+    /**
+     * Persists an entity with a specific ID using the ObjectStore.
+     * This is a convenience method that delegates to ObjectStore.persist(entity, id).
+     *
+     * @param entity The entity to persist
+     * @param id The ID to use
+     */
+    public <T> void persist(T entity, Object id) {
+        checkClosed();
+        objectStore.persist(entity, id);
+    }
+
+    /**
+     * Finds all entities of a given type using the ObjectStore.
+     * This is a convenience method that delegates to ObjectStore.findAll().
+     *
+     * @param clazz The entity class
+     * @return List of all entities of that type
+     */
+    public <T> List<T> findAll(Class<T> clazz) {
+        checkClosed();
+        return objectStore.findAll(clazz);
+    }
+
+    /**
+     * Deletes an entity by its ID using the ObjectStore.
+     * This is a convenience method that delegates to ObjectStore.remove().
+     *
+     * @param clazz The entity class
+     * @param id The ID to delete
+     * @return true if the entity was deleted
+     */
+    public <T> boolean remove(Class<T> clazz, Object id) {
+        checkClosed();
+        return objectStore.remove(clazz, id);
+    }
+
+    /**
+     * Deletes an entity using the ObjectStore.
+     * This is a convenience method that delegates to ObjectStore.remove().
+     *
+     * @param entity The entity to delete
+     * @return true if the entity was deleted
+     */
+    public <T> boolean remove(T entity) {
+        checkClosed();
+        return objectStore.remove(entity);
+    }
+
+    /**
+     * Updates an existing entity using the ObjectStore.
+     * This is a convenience method that delegates to ObjectStore.update().
+     *
+     * @param entity The entity to update
+     */
+    public <T> void update(T entity) {
+        checkClosed();
+        objectStore.update(entity);
     }
 
     /**

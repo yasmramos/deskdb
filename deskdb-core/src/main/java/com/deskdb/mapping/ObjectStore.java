@@ -1,36 +1,23 @@
 package com.deskdb.mapping;
 
 import java.io.*;
-import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * ObjectStore provides a simple object persistence mechanism using Java serialization.
+ * ObjectStore provides a simple in-memory object persistence mechanism using Java serialization.
  * It allows storing and retrieving Java objects without SQL functionality.
+ * All data is kept in memory for maximum performance (no disk persistence).
  */
 public class ObjectStore {
 
-    private final Path storageDir;
     private final Map<String, Map<Object, byte[]>> inMemoryStore;
-    private final boolean useInMemory;
-
-    public ObjectStore(Path storageDir) {
-        this.storageDir = storageDir;
-        this.inMemoryStore = new ConcurrentHashMap<>();
-        this.useInMemory = true; // Default to in-memory storage
-        
-        if (!useInMemory && storageDir != null) {
-            try {
-                Files.createDirectories(storageDir);
-            } catch (IOException e) {
-                throw new RuntimeException("Failed to create storage directory", e);
-            }
-        }
-    }
+    
+    // ID generators per class type
+    private final Map<String, Long> idGenerators = new ConcurrentHashMap<>();
 
     public ObjectStore() {
-        this(null);
+        this.inMemoryStore = new ConcurrentHashMap<>();
     }
 
     /**
@@ -86,9 +73,11 @@ public class ObjectStore {
         }
         
         List<T> entities = new ArrayList<>();
-        for (byte[] data : typeStore.values()) {
-            T entity = deserialize(data);
+        for (Map.Entry<Object, byte[]> entry : typeStore.entrySet()) {
+            T entity = deserialize(entry.getValue());
             if (entity != null) {
+                // Set the ID on the entity
+                setIdOnEntity(entity, entry.getKey());
                 entities.add(entity);
             }
         }
@@ -145,6 +134,7 @@ public class ObjectStore {
      */
     public void clear() {
         inMemoryStore.clear();
+        idGenerators.clear();
     }
 
     /**
@@ -154,6 +144,7 @@ public class ObjectStore {
     public <T> void clear(Class<T> clazz) {
         String typeName = clazz.getName();
         inMemoryStore.remove(typeName);
+        idGenerators.remove(typeName);
     }
 
     // Private helper methods
@@ -193,21 +184,7 @@ public class ObjectStore {
     }
 
     private Object generateId(String typeName) {
-        Map<Object, byte[]> typeStore = inMemoryStore.get(typeName);
-        if (typeStore == null || typeStore.isEmpty()) {
-            return 1L;
-        }
-        
-        long maxId = 0;
-        for (Object key : typeStore.keySet()) {
-            if (key instanceof Number) {
-                long id = ((Number) key).longValue();
-                if (id > maxId) {
-                    maxId = id;
-                }
-            }
-        }
-        return maxId + 1;
+        return idGenerators.compute(typeName, (k, v) -> v == null ? 1L : v + 1);
     }
 
     private <T> void setIdOnEntity(T entity, Object id) {
