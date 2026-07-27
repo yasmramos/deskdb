@@ -345,7 +345,7 @@ public class DeskDB implements AutoCloseable {
      */
     public ObjectStore createObjectStore() {
         checkClosed();
-        return new ObjectStore();
+        return new ObjectStore(this);
     }
 
     /**
