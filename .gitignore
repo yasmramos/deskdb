@@ -11,10 +11,9 @@ target/
 .gradle/
 .mypy_cache/
 .pytest_cache/
-__pycache__/
-node_modules/
-venv/
-.venv/
+coverage/
+htmlcov/
+*.coverage
 
 # Logs and temp files
 *.log
@@ -32,12 +31,7 @@ venv/
 *.swp
 *.swo
 
-# Coverage
-coverage/
-htmlcov/
-.coverage
-
-# System
+# System files
 .DS_Store
 Thumbs.db
 ```
