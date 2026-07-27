@@ -1,7 +1,7 @@
 package com.deskdb.core;
 
 import com.deskdb.index.BTree;
-import com.deskdb.mapping.EntityManager;
+import com.deskdb.mapping.ObjectStore;
 import com.deskdb.storage.Wal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -307,13 +307,13 @@ public class DeskDB implements AutoCloseable {
     }
 
     /**
-     * Creates an EntityManager for ORM operations.
+     * Creates an ObjectStore for object persistence operations.
      * 
-     * @return EntityManager instance for entity operations
+     * @return ObjectStore instance for object storage operations
      */
-    public EntityManager createEntityManager() {
+    public ObjectStore createObjectStore() {
         checkClosed();
-        return new EntityManager(this);
+        return new ObjectStore();
     }
 
     /**
