@@ -1,7 +1,7 @@
 package com.deskdb.core;
 
 import com.deskdb.index.BTree;
-import com.deskdb.mapping.EntityManager;
+import com.deskdb.mapping.ObjectStore;
 import com.deskdb.storage.Wal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,6 +35,7 @@ public class DeskDB implements AutoCloseable {
     private final Map<String, Table> tables;
     private final Map<String, TableSchema> schemas;
     private final Map<String, Map<String, BTree<?, ?>>> indexes; // tableName -> indexName -> BTree
+    private final ObjectStore objectStore; // Single shared instance for object persistence
     private Wal wal;
     private boolean closed = false;
     private final AtomicInteger transactionCounter = new AtomicInteger(0);
@@ -48,6 +49,7 @@ public class DeskDB implements AutoCloseable {
         this.tables = new ConcurrentHashMap<>();
         this.schemas = new HashMap<>();
         this.indexes = new ConcurrentHashMap<>();
+        this.objectStore = new ObjectStore(this); // Initialize shared ObjectStore with integrated storage
         
         // Determinar ruta del WAL (mismo directorio que el archivo .deskdb)
         Path walPath = dbPath.resolveSibling(dbPath.getFileName().toString() + ".wal");
@@ -73,6 +75,36 @@ public class DeskDB implements AutoCloseable {
         this.wal = Wal.open(walPath);
         
         logger.info("DeskDB opened at {} with WAL at {}", dbPath.toAbsolutePath(), walPath.toAbsolutePath());
+    }
+    
+    /**
+     * Creates an in-memory only DeskDB instance.
+     * All data (both SQL tables and objects) will be lost when the instance is closed or the JVM exits.
+     * This is useful for testing or temporary data storage.
+     *
+     * @return In-memory DeskDB instance
+     * @throws IOException if there is an IO error
+     */
+    public static DeskDB inMemory() throws IOException {
+        // Create a temporary path that won't be persisted
+        Path tempPath = Files.createTempFile("deskdb_inmemory_", ".deskdb");
+        tempPath.toFile().deleteOnExit();
+        
+        DeskDB db = new DeskDB(tempPath, true);
+        logger.info("In-memory DeskDB created");
+        return db;
+    }
+    
+    // Private constructor for in-memory mode
+    private DeskDB(Path dbPath, boolean inMemoryOnly) throws IOException {
+        this.dbPath = dbPath;
+        this.tables = new ConcurrentHashMap<>();
+        this.schemas = new HashMap<>();
+        this.indexes = new ConcurrentHashMap<>();
+        this.objectStore = null; // No ObjectStore for pure in-memory mode
+        this.wal = null; // No WAL for in-memory mode
+        
+        logger.info("In-memory DeskDB initialized (no object persistence)");
     }
 
     /**
@@ -307,13 +339,98 @@ public class DeskDB implements AutoCloseable {
     }
 
     /**
-     * Creates an EntityManager for ORM operations.
+     * Creates an ObjectStore for object persistence operations.
      * 
-     * @return EntityManager instance for entity operations
+     * @return ObjectStore instance for object storage operations
      */
-    public EntityManager createEntityManager() {
+    public ObjectStore createObjectStore() {
         checkClosed();
-        return new EntityManager(this);
+        return new ObjectStore(this);
+    }
+
+    /**
+     * Finds an entity by its ID using the ObjectStore.
+     * This is a convenience method that delegates to ObjectStore.find().
+     *
+     * @param clazz The entity class
+     * @param id The ID to search for
+     * @return The entity or null if not found
+     */
+    public <T> T find(Class<T> clazz, Object id) {
+        checkClosed();
+        return objectStore.find(clazz, id);
+    }
+
+    /**
+     * Persists an entity using the ObjectStore.
+     * This is a convenience method that delegates to ObjectStore.persist().
+     *
+     * @param entity The entity to persist
+     * @return The generated ID
+     */
+    public <T> Object persist(T entity) {
+        checkClosed();
+        return objectStore.persist(entity);
+    }
+
+    /**
+     * Persists an entity with a specific ID using the ObjectStore.
+     * This is a convenience method that delegates to ObjectStore.persist(entity, id).
+     *
+     * @param entity The entity to persist
+     * @param id The ID to use
+     */
+    public <T> void persist(T entity, Object id) {
+        checkClosed();
+        objectStore.persist(entity, id);
+    }
+
+    /**
+     * Finds all entities of a given type using the ObjectStore.
+     * This is a convenience method that delegates to ObjectStore.findAll().
+     *
+     * @param clazz The entity class
+     * @return List of all entities of that type
+     */
+    public <T> List<T> findAll(Class<T> clazz) {
+        checkClosed();
+        return objectStore.findAll(clazz);
+    }
+
+    /**
+     * Deletes an entity by its ID using the ObjectStore.
+     * This is a convenience method that delegates to ObjectStore.remove().
+     *
+     * @param clazz The entity class
+     * @param id The ID to delete
+     * @return true if the entity was deleted
+     */
+    public <T> boolean remove(Class<T> clazz, Object id) {
+        checkClosed();
+        return objectStore.remove(clazz, id);
+    }
+
+    /**
+     * Deletes an entity using the ObjectStore.
+     * This is a convenience method that delegates to ObjectStore.remove().
+     *
+     * @param entity The entity to delete
+     * @return true if the entity was deleted
+     */
+    public <T> boolean remove(T entity) {
+        checkClosed();
+        return objectStore.remove(entity);
+    }
+
+    /**
+     * Updates an existing entity using the ObjectStore.
+     * This is a convenience method that delegates to ObjectStore.update().
+     *
+     * @param entity The entity to update
+     */
+    public <T> void update(T entity) {
+        checkClosed();
+        objectStore.update(entity);
     }
 
     /**
