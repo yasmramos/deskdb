@@ -1,23 +1,53 @@
 package com.deskdb.mapping;
 
 import java.io.*;
+import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * ObjectStore provides a simple in-memory object persistence mechanism using Java serialization.
- * It allows storing and retrieving Java objects without SQL functionality.
- * All data is kept in memory for maximum performance (no disk persistence).
+ * ObjectStore provides object persistence for Java objects using serialization.
+ * <p>
+ * Supports two modes:
+ * <ul>
+ *   <li><b>Disk-backed:</b> When created with a database file path, data persists across sessions.</li>
+ *   <li><b>In-memory only:</b> When created with the no-arg constructor, data lives only in RAM.</li>
+ * </ul>
+ * </p>
  */
 public class ObjectStore {
 
+    private static final String STORE_FILE_SUFFIX = ".objdb";
+    
     private final Map<String, Map<Object, byte[]>> inMemoryStore;
     
     // ID generators per class type
     private final Map<String, Long> idGenerators = new ConcurrentHashMap<>();
+    
+    private final Path storagePath;
+    private final boolean inMemoryOnly;
 
+    /**
+     * Creates an ObjectStore backed by a file on disk.
+     * Data will be persisted to a sibling file with .objdb extension.
+     * 
+     * @param dbFilePath Path to the main database file
+     */
+    public ObjectStore(Path dbFilePath) {
+        this.inMemoryStore = new ConcurrentHashMap<>();
+        this.inMemoryOnly = false;
+        this.storagePath = Paths.get(dbFilePath.toString() + STORE_FILE_SUFFIX);
+        loadFromDisk();
+    }
+    
+    /**
+     * Creates an in-memory only ObjectStore.
+     * Data will be lost when the instance is garbage collected or the JVM exits.
+     */
     public ObjectStore() {
         this.inMemoryStore = new ConcurrentHashMap<>();
+        this.inMemoryOnly = true;
+        this.storagePath = null;
     }
 
     /**
@@ -98,7 +128,11 @@ public class ObjectStore {
             return false;
         }
         
-        return typeStore.remove(id) != null;
+        boolean removed = typeStore.remove(id) != null;
+        if (removed && !inMemoryOnly) {
+            saveToDisk();
+        }
+        return removed;
     }
 
     /**
@@ -135,6 +169,9 @@ public class ObjectStore {
     public void clear() {
         inMemoryStore.clear();
         idGenerators.clear();
+        if (!inMemoryOnly) {
+            saveToDisk();
+        }
     }
 
     /**
@@ -145,6 +182,20 @@ public class ObjectStore {
         String typeName = clazz.getName();
         inMemoryStore.remove(typeName);
         idGenerators.remove(typeName);
+        if (!inMemoryOnly) {
+            saveToDisk();
+        }
+    }
+    
+    /**
+     * Closes the store and persists data if not in-memory only.
+     */
+    public void close() {
+        if (!inMemoryOnly) {
+            saveToDisk();
+        }
+        inMemoryStore.clear();
+        idGenerators.clear();
     }
 
     // Private helper methods
@@ -152,6 +203,9 @@ public class ObjectStore {
     private <T> void store(String typeName, Object id, T entity) {
         byte[] data = serialize(entity);
         inMemoryStore.computeIfAbsent(typeName, k -> new ConcurrentHashMap<>()).put(id, data);
+        if (!inMemoryOnly) {
+            saveToDisk();
+        }
     }
 
     private Object retrieve(String typeName, Object id) {
@@ -229,6 +283,42 @@ public class ObjectStore {
             return clazz.getDeclaredField("id");
         } catch (NoSuchFieldException e) {
             return null;
+        }
+    }
+    
+    private synchronized void saveToDisk() {
+        if (inMemoryOnly || storagePath == null) return;
+        
+        try {
+            Files.createDirectories(storagePath.getParent());
+            try (ObjectOutputStream oos = new ObjectOutputStream(Files.newOutputStream(storagePath))) {
+                // Write ID Generators
+                oos.writeObject(idGenerators);
+                // Write Data
+                oos.writeObject(inMemoryStore);
+            }
+        } catch (IOException e) {
+            System.err.println("Failed to save ObjectStore to disk: " + e.getMessage());
+        }
+    }
+    
+    @SuppressWarnings("unchecked")
+    private synchronized void loadFromDisk() {
+        if (inMemoryOnly || storagePath == null || !Files.exists(storagePath)) return;
+        
+        try (ObjectInputStream ois = new ObjectInputStream(Files.newInputStream(storagePath))) {
+            // Read ID Generators
+            Object genObj = ois.readObject();
+            if (genObj instanceof Map) {
+                idGenerators.putAll((Map<String, Long>) genObj);
+            }
+            // Read Data
+            Object dataObj = ois.readObject();
+            if (dataObj instanceof Map) {
+                inMemoryStore.putAll((Map<String, Map<Object, byte[]>>) dataObj);
+            }
+        } catch (IOException | ClassNotFoundException e) {
+            System.out.println("Failed to load ObjectStore from disk (starting fresh): " + e.getMessage());
         }
     }
 }
