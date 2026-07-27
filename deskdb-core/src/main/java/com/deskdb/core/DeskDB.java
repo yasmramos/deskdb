@@ -49,7 +49,7 @@ public class DeskDB implements AutoCloseable {
         this.tables = new ConcurrentHashMap<>();
         this.schemas = new HashMap<>();
         this.indexes = new ConcurrentHashMap<>();
-        this.objectStore = new ObjectStore(); // Initialize shared ObjectStore
+        this.objectStore = new ObjectStore(dbPath); // Initialize shared ObjectStore with disk persistence
         
         // Determinar ruta del WAL (mismo directorio que el archivo .deskdb)
         Path walPath = dbPath.resolveSibling(dbPath.getFileName().toString() + ".wal");
@@ -75,6 +75,36 @@ public class DeskDB implements AutoCloseable {
         this.wal = Wal.open(walPath);
         
         logger.info("DeskDB opened at {} with WAL at {}", dbPath.toAbsolutePath(), walPath.toAbsolutePath());
+    }
+    
+    /**
+     * Creates an in-memory only DeskDB instance.
+     * All data (both SQL tables and objects) will be lost when the instance is closed or the JVM exits.
+     * This is useful for testing or temporary data storage.
+     *
+     * @return In-memory DeskDB instance
+     * @throws IOException if there is an IO error
+     */
+    public static DeskDB inMemory() throws IOException {
+        // Create a temporary path that won't be persisted
+        Path tempPath = Files.createTempFile("deskdb_inmemory_", ".deskdb");
+        tempPath.toFile().deleteOnExit();
+        
+        DeskDB db = new DeskDB(tempPath, true);
+        logger.info("In-memory DeskDB created");
+        return db;
+    }
+    
+    // Private constructor for in-memory mode
+    private DeskDB(Path dbPath, boolean inMemoryOnly) throws IOException {
+        this.dbPath = dbPath;
+        this.tables = new ConcurrentHashMap<>();
+        this.schemas = new HashMap<>();
+        this.indexes = new ConcurrentHashMap<>();
+        this.objectStore = new ObjectStore(); // In-memory ObjectStore
+        this.wal = null; // No WAL for in-memory mode
+        
+        logger.info("In-memory DeskDB initialized");
     }
 
     /**
