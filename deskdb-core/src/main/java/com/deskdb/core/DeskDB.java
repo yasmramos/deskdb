@@ -101,10 +101,10 @@ public class DeskDB implements AutoCloseable {
         this.tables = new ConcurrentHashMap<>();
         this.schemas = new HashMap<>();
         this.indexes = new ConcurrentHashMap<>();
-        this.objectStore = null; // No ObjectStore for pure in-memory mode
+        this.objectStore = new ObjectStore(this, true); // Initialize ObjectStore with in-memory flag
         this.wal = null; // No WAL for in-memory mode
         
-        logger.info("In-memory DeskDB initialized (no object persistence)");
+        logger.info("In-memory DeskDB initialized (no disk persistence)");
     }
 
     /**
