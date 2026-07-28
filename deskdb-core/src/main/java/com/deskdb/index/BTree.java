@@ -186,6 +186,12 @@ public class BTree<K extends Comparable<K>, V> {
     /**
      * Optimized range search implementation with proper pruning.
      * Avoids visiting subtrees that cannot contain keys in the target range.
+     * 
+     * Algorithm:
+     * 1. Skip all keys < from (O(log n) pruning)
+     * 2. Process keys in range [from, to]
+     * 3. Early termination when key > to
+     * 4. Only visit children that can contain keys in range
      */
     private void rangeSearchOptimized(Node node, K from, K to, List<Long> result) {
         if (node == null) {
@@ -210,87 +216,34 @@ public class BTree<K extends Comparable<K>, V> {
             
             // For non-leaf nodes, visit the left child before processing the key
             if (!node.isLeaf) {
-                // Only visit child if it could contain keys >= from
-                if (i == 0 || ((K) node.keys[i - 1]).compareTo(from) < 0) {
-                    rangeSearchOptimized(node.children[i], from, to, result);
-                }
-            }
-            
-            // If key is in range [from, to], add its value(s)
-            if (key.compareTo(from) >= 0 && key.compareTo(to) <= 0) {
-                if (node.isLeaf) {
+                // Visit child[i] - it contains keys < key[i]
+                // Only visit if it could contain keys >= from
+                rangeSearchOptimized(node.children[i], from, to, result);
+                
+                // If key is in range, add it (for internal nodes, values are stored here too)
+                if (key.compareTo(from) >= 0 && key.compareTo(to) <= 0) {
                     result.add(node.values[i]);
-                } else {
-                    // For non-leaf nodes, we need to search the right subtree
-                    // This handles duplicate keys stored in the subtree
-                    searchSubtreeOptimized(node.children[i + 1], from, to, result);
+                }
+            } else {
+                // Leaf node - just add values in range
+                if (key.compareTo(from) >= 0 && key.compareTo(to) <= 0) {
+                    result.add(node.values[i]);
                 }
             }
             
             i++;
         }
         
-        // Visit the rightmost child if it could contain keys <= to
+        // Visit the rightmost child (contains keys > last key in node)
         if (!node.isLeaf && i <= node.keyCount) {
-            // Only visit if the last processed key was < to
-            if (node.keyCount == 0 || ((K) node.keys[node.keyCount - 1]).compareTo(to) < 0) {
-                rangeSearchOptimized(node.children[node.keyCount], from, to, result);
+            // Only visit if we haven't exceeded 'to' yet
+            if (i == 0 || ((K) node.keys[i - 1]).compareTo(to) < 0) {
+                rangeSearchOptimized(node.children[i], from, to, result);
             }
         }
     }
     
-    /**
-     * Optimized subtree search with early pruning.
-     * Only visits nodes that can contain keys within [from, to].
-     */
-    @SuppressWarnings("unchecked")
-    private void searchSubtreeOptimized(Node node, K from, K to, List<Long> result) {
-        if (node == null) {
-            return;
-        }
-        
-        int i = 0;
-        
-        // Skip keys < from
-        while (i < node.keyCount && ((K) node.keys[i]).compareTo(from) < 0) {
-            i++;
-        }
-        
-        // Process keys in range
-        while (i < node.keyCount) {
-            K key = (K) node.keys[i];
-            
-            // Early termination
-            if (key.compareTo(to) > 0) {
-                break;
-            }
-            
-            // Visit left child if needed
-            if (!node.isLeaf) {
-                if (i == 0 || ((K) node.keys[i - 1]).compareTo(from) < 0) {
-                    searchSubtreeOptimized(node.children[i], from, to, result);
-                }
-            }
-            
-            // Add matching keys
-            if (key.compareTo(from) >= 0 && key.compareTo(to) <= 0) {
-                if (node.isLeaf) {
-                    result.add(node.values[i]);
-                } else {
-                    searchSubtreeOptimized(node.children[i + 1], from, to, result);
-                }
-            }
-            
-            i++;
-        }
-        
-        // Visit rightmost child if needed
-        if (!node.isLeaf && i <= node.keyCount) {
-            if (node.keyCount == 0 || ((K) node.keys[node.keyCount - 1]).compareTo(to) < 0) {
-                searchSubtreeOptimized(node.children[node.keyCount], from, to, result);
-            }
-        }
-    }
+
     
     @SuppressWarnings("unchecked")
     public boolean delete(K key, long value) {
