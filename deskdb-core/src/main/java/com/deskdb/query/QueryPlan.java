@@ -10,6 +10,7 @@ public class QueryPlan {
     private boolean useFullScan;
     private List<Filter> filters = new ArrayList<>();
     private int estimatedCost;
+    private Filter primaryFilter;
 
     public QueryPlan useIndex(BTree index) {
         this.index = index;
@@ -25,6 +26,10 @@ public class QueryPlan {
 
     public QueryPlan addFilter(Filter filter) {
         this.filters.add(filter);
+        // El primer filtro es el primario (el que usa el índice)
+        if (this.primaryFilter == null) {
+            this.primaryFilter = filter;
+        }
         return this;
     }
 
@@ -37,4 +42,19 @@ public class QueryPlan {
     public boolean isUseFullScan() { return useFullScan; }
     public List<Filter> getFilters() { return filters; }
     public int getEstimatedCost() { return estimatedCost; }
+    
+    /**
+     * Retorna el filtro primario que se usa para la búsqueda con índice.
+     */
+    public Filter getPrimaryFilter() {
+        return primaryFilter != null ? primaryFilter : 
+               (filters.isEmpty() ? null : filters.get(0));
+    }
+    
+    /**
+     * Verifica si el plan usa un índice para la ejecución.
+     */
+    public boolean useIndex() {
+        return index != null && !useFullScan;
+    }
 }
