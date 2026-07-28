@@ -36,8 +36,8 @@ public class QueryOptimizer {
         return op == Filter.Operator.EQ || 
                op == Filter.Operator.GT || 
                op == Filter.Operator.LT || 
-                
-                
-               op == Filter.Operator.ALL;
+               op == Filter.Operator.GTE || 
+               op == Filter.Operator.LTE ||
+               op == Filter.Operator.BETWEEN;
     }
 }
