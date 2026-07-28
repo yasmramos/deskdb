@@ -51,7 +51,6 @@ public class DeskDB implements AutoCloseable {
         this.tables = new ConcurrentHashMap<>();
         this.schemas = new HashMap<>();
         this.indexes = new ConcurrentHashMap<>();
-        this.objectStore = new ObjectStore(this); // Initialize shared ObjectStore with integrated storage
         
         // Determinar ruta del WAL (mismo directorio que el archivo .deskdb)
         Path walPath = dbPath.resolveSibling(dbPath.getFileName().toString() + ".wal");
@@ -72,6 +71,10 @@ public class DeskDB implements AutoCloseable {
             }
             saveToFile();
         }
+        
+        // Initialize ObjectStore AFTER loading data to ensure proper order
+        this.objectStore = new ObjectStore(this, false);
+        this.objectStore.initialize();  // Explicit initialization after data load
         
         // Inicializar WAL
         this.wal = Wal.open(walPath);
@@ -525,8 +528,8 @@ public class DeskDB implements AutoCloseable {
 
     @SuppressWarnings("unchecked")
     private void loadFromFile() throws IOException {
-        // Use read lock to allow concurrent reads during load
-        dbLock.readLock().lock();
+        // Use write lock since we're modifying data structures during load
+        dbLock.writeLock().lock();
         try {
             byte[] content = Files.readAllBytes(dbPath);
             if (content.length > 0) {
@@ -555,6 +558,7 @@ public class DeskDB implements AutoCloseable {
                     Table table = new Table(tableName, List.of(columns), dbPath.toString());
                     table.setDb(this);
                     tables.put(tableName, table);
+                    indexes.put(tableName, new ConcurrentHashMap<>());
                 }
                 
                 // Read data if exists
@@ -602,7 +606,7 @@ public class DeskDB implements AutoCloseable {
         } catch (Exception e) {
             logger.warn("Error loading existing data, starting with empty DB: {}", e.getMessage(), e);
         } finally {
-            dbLock.readLock().unlock();
+            dbLock.writeLock().unlock();
         }
     }
     

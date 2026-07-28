@@ -5,6 +5,9 @@ import org.openjdk.jmh.runner.RunnerException;
 import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
 import org.openjdk.jmh.runner.options.TimeValue;
+import org.slf4j.LoggerFactory;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.LoggerContext;
 
 /**
  * Runner class to execute all DeskDB benchmarks.
@@ -14,6 +17,9 @@ import org.openjdk.jmh.runner.options.TimeValue;
 public class BenchmarkRunner {
 
     public static void main(String[] args) throws RunnerException {
+        // Disable all logging for accurate benchmark measurements
+        disableLogging();
+        
         System.out.println("Starting DeskDB Benchmarks...");
         System.out.println("=============================");
 
@@ -32,5 +38,18 @@ public class BenchmarkRunner {
 
         System.out.println("=============================");
         System.out.println("Benchmarks completed successfully!");
+    }
+    
+    /**
+     * Disables all SLF4J/Logback logging to prevent I/O overhead during benchmarks.
+     */
+    private static void disableLogging() {
+        LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
+        context.getLoggerList().forEach(logger -> {
+            logger.setLevel(Level.OFF);
+            logger.detachAndStopAllAppenders();
+        });
+        context.getRootLogger().setLevel(Level.OFF);
+        context.getRootLogger().detachAndStopAllAppenders();
     }
 }
