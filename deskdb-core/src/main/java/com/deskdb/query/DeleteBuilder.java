@@ -184,5 +184,30 @@ public class DeleteBuilder {
             parent.filter = new Filter(column, Filter.Operator.EQ, value);
             return parent;
         }
+
+        public WhereCondition eqCond(Object value) {
+            parent.filter = new Filter(column, Filter.Operator.EQ, value);
+            return this;
+        }
+
+        public WhereCondition gtCond(Object value) {
+            parent.filter = new Filter(column, Filter.Operator.GT, value);
+            return this;
+        }
+
+        public WhereCondition gteCond(Object value) {
+            parent.filter = new Filter(column, Filter.Operator.GTE, value);
+            return this;
+        }
+
+        public WhereCondition ltCond(Object value) {
+            parent.filter = new Filter(column, Filter.Operator.LT, value);
+            return this;
+        }
+
+        public WhereCondition lteCond(Object value) {
+            parent.filter = new Filter(column, Filter.Operator.LTE, value);
+            return this;
+        }
     }
 }
