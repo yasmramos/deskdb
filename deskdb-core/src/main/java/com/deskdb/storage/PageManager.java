@@ -5,7 +5,9 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Map;
+import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -13,6 +15,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 /**
  * Gestor de páginas con cache LRU y acceso concurrente.
  * Soporta multi-hilo mediante locks granulares por página.
+ * Incluye Free List para reutilización de páginas eliminadas.
  */
 public class PageManager {
     private final FileChannel channel;
@@ -21,6 +24,10 @@ public class PageManager {
     private final ExecutorService flushExecutor;
     private final int maxCacheSize;
     
+    // Free List: cola de páginas libres para reutilización
+    private final Queue<Long> freePageList;
+    private final Object freeListLock = new Object();
+    
     public PageManager(Path filePath) throws IOException {
         this.channel = FileChannel.open(filePath, 
             StandardOpenOption.CREATE, 
@@ -28,11 +35,33 @@ public class PageManager {
             StandardOpenOption.WRITE);
         this.pageCache = new ConcurrentHashMap<>();
         this.maxCacheSize = 1000; // Configurable
+        this.freePageList = new ConcurrentLinkedQueue<>();
         this.flushExecutor = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "PageFlusher");
             t.setDaemon(true);
             return t;
         });
+        
+        // Inicializar Free List escaneando páginas existentes
+        initializeFreeList();
+    }
+    
+    /**
+     * Escanea el archivo en busca de páginas marcadas como libres (0xFFFFFFFF).
+     * Las añade a la Free List para reutilización.
+     */
+    private void initializeFreeList() throws IOException {
+        long totalPages = channel.size() / Page.PAGE_SIZE;
+        for (long i = 0; i < totalPages; i++) {
+            try {
+                Page page = getPage(i);
+                if (page.getFlags() == 0xFFFFFFFF) {
+                    freePageList.offer(i);
+                }
+            } catch (Exception e) {
+                // Ignorar errores durante inicialización
+            }
+        }
     }
     
     /**
@@ -77,12 +106,21 @@ public class PageManager {
     
     /**
      * Asigna una nueva página libre.
+     * Primero intenta reutilizar de la Free List, si está vacía asigna al final del archivo.
      * Retorna el número de página asignada.
      * Thread-safe: usa sincronización para evitar colisiones.
      */
     public synchronized Page allocatePage() throws IOException {
-        // Buscar primera página libre (flags == 0xFFFFFFFF o no usada)
-        // Por simplicidad, asignamos al final del archivo
+        // Intentar obtener de la Free List primero (más rápido que expandir archivo)
+        Long freePageNumber = freePageList.poll();
+        if (freePageNumber != null) {
+            // Reutilizar página existente
+            Page page = getPage(freePageNumber);
+            page.setFlags(0x00000000); // Marcar como usada
+            return page;
+        }
+        
+        // Free List vacía: asignar nueva página al final del archivo
         long newPageNumber = channel.size() / Page.PAGE_SIZE;
         return getPage(newPageNumber);
     }
@@ -101,11 +139,15 @@ public class PageManager {
     
     /**
      * Libera una página para reutilización futura.
+     * La página se añade a la Free List para ser reutilizada en futuras asignaciones.
      */
     public void freePage(long pageNumber) throws IOException {
         Page page = getPage(pageNumber);
         page.setFlags(0xFFFFFFFF); // Marca como libre
         page.flush();
+        
+        // Añadir a la Free List para reutilización
+        freePageList.offer(pageNumber);
         
         // No remover del cache inmediatamente para evitar I/O extra
     }
