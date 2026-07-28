@@ -49,7 +49,5 @@ public class BenchmarkRunner {
             logger.setLevel(Level.OFF);
             logger.detachAndStopAllAppenders();
         });
-        context.getRootLogger().setLevel(Level.OFF);
-        context.getRootLogger().detachAndStopAllAppenders();
     }
 }

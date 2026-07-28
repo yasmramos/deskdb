@@ -1,11 +1,10 @@
 package com.deskdb.query;
 
-import com.deskdb.core.Table;
-import com.deskdb.core.Filter;
-import com.deskdb.core.Row;
-import com.deskdb.core.Transaction;
-import java.util.Collections;
+import com.deskdb.core.*;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Collections;
 
 /**
  * Optimized DELETE builder with direct execution path.
@@ -20,6 +19,7 @@ public class DeleteBuilder {
     private final String tableName;
     private Filter filter;
     private boolean useLightweightMVCC = false;
+    private boolean softDelete = false;
 
     public DeleteBuilder(Table table) {
         this.table = table;
@@ -44,6 +44,16 @@ public class DeleteBuilder {
         return this;
     }
 
+    /**
+     * Enables soft delete mode. Instead of physically deleting rows,
+     * marks them with a deleted flag and timestamp.
+     * @return this builder for method chaining
+     */
+    public DeleteBuilder soft() {
+        this.softDelete = true;
+        return this;
+    }
+
     public WhereCondition where(String column) {
         return new WhereCondition(column, this);
     }
@@ -52,7 +62,7 @@ public class DeleteBuilder {
      * Execute the DELETE operation with optimized direct execution.
      * All matching rows are deleted in a single transaction batch for maximum performance.
      * 
-     * @return number of rows deleted
+     * @return number of rows deleted (or soft-deleted)
      * @throws Exception if an error occurs during execution
      */
     public int execute() throws Exception {
@@ -72,6 +82,11 @@ public class DeleteBuilder {
 
         if (rows.isEmpty()) {
             return 0;
+        }
+        
+        // Handle soft delete
+        if (softDelete) {
+            return executeSoftDelete(rows, actualTableName);
         }
         
         // OPTIMIZED: Batch all deletes in a single transaction (7.5x faster)
@@ -95,6 +110,34 @@ public class DeleteBuilder {
             }
         }
         
+        return rows.size();
+    }
+    
+    /**
+     * Executes a soft delete by marking rows as deleted instead of removing them.
+     * Adds 'deleted' and 'deletedAt' fields to the row.
+     */
+    private int executeSoftDelete(List<Row> rows, String tableName) throws Exception {
+        if (transaction != null) {
+            for (Row row : rows) {
+                Map<String, Object> newValues = new HashMap<>(row.getValues());
+                newValues.put("deleted", true);
+                newValues.put("deletedAt", java.time.LocalDateTime.now());
+                Row newRow = new Row(row.getRowId(), newValues);
+                transaction.applyChange(tableName, row.getRowId(), newRow);
+            }
+        } else {
+            try (Transaction autoTx = table.getDb().beginTransaction()) {
+                for (Row row : rows) {
+                    Map<String, Object> newValues = new HashMap<>(row.getValues());
+                    newValues.put("deleted", true);
+                    newValues.put("deletedAt", java.time.LocalDateTime.now());
+                    Row newRow = new Row(row.getRowId(), newValues);
+                    autoTx.applyChange(tableName, row.getRowId(), newRow);
+                }
+                autoTx.commit();
+            }
+        }
         return rows.size();
     }
 

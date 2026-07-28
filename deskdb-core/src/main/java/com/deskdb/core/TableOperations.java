@@ -4,6 +4,7 @@ import com.deskdb.query.SelectBuilder;
 import com.deskdb.query.InsertBuilder;
 import com.deskdb.query.UpdateBuilder;
 import com.deskdb.query.DeleteBuilder;
+import com.deskdb.query.HistoryBuilder;
 
 public class TableOperations {
     private final DeskDB db;
@@ -31,6 +32,19 @@ public class TableOperations {
             throw new RuntimeException("Table '" + tableName + "' not found");
         }
         return new SelectBuilder(table);
+    }
+
+    /**
+     * Creates a HistoryBuilder for time-travel queries.
+     * Usage: db.table("users").history().history(123L).asOf(timestamp).execute()
+     * @return a new HistoryBuilder instance
+     */
+    public HistoryBuilder history() {
+        Table table = db.getTable(tableName);
+        if (table == null) {
+            throw new RuntimeException("Table '" + tableName + "' not found");
+        }
+        return new HistoryBuilder(table);
     }
 
     public InsertBuilder insert() {
@@ -64,6 +78,18 @@ public class TableOperations {
             throw new RuntimeException("Table '" + tableName + "' not found");
         }
         return new DeleteBuilder(table);
+    }
+
+    /**
+     * Restores soft-deleted rows.
+     * Usage: db.table("users").restore().where("id").eq(123).execute()
+     * @return an UpdateBuilder configured to restore soft-deleted rows
+     */
+    public UpdateBuilder restore() {
+        UpdateBuilder builder = update();
+        builder.set("deleted", false);
+        builder.set("deletedAt", null);
+        return builder;
     }
 
     // Helper para WHERE directo: db.table("x").where("col").is(val).select()

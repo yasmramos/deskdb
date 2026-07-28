@@ -1,9 +1,6 @@
 package com.deskdb.query;
 
-import com.deskdb.core.Table;
-import com.deskdb.core.Row;
-import com.deskdb.core.Filter;
-import com.deskdb.core.Transaction;
+import com.deskdb.core.*;
 import com.deskdb.index.BTree;
 import java.util.ArrayList;
 import java.util.List;
@@ -32,6 +29,14 @@ public class SelectBuilder {
         this.table = null;
         this.transaction = transaction;
         this.tableName = tableName;
+    }
+
+    /**
+     * Creates a HistoryBuilder for time-travel queries.
+     * @return a new HistoryBuilder instance
+     */
+    public HistoryBuilder history() {
+        return new HistoryBuilder(table);
     }
 
     public SelectBuilder columns(String... cols) {
