@@ -82,36 +82,47 @@ public class QueryEngineIntegrationTest {
     @DisplayName("Query Optimizer Tests")
     class QueryOptimizerTests {
         
+        private Path nestedTempDbPath;
+        
         @BeforeEach
         void setUp() throws Exception {
-            // Re-initialize for nested test class
-            if (db == null || db.isClosed()) {
-                tempDbPath = Files.createTempFile("query_test", ".deskdb");
-                db = DeskDB.open(tempDbPath);
-                db.createTable("products",
-                    new Column("id", DataType.LONG).primaryKey(),
-                    new Column("name", DataType.STRING),
-                    new Column("price", DataType.DOUBLE),
-                    new Column("quantity", DataType.INT),
-                    new Column("category", DataType.STRING),
-                    new Column("active", DataType.BOOLEAN)
-                );
-                table = db.getTable("products");
-                insertProduct(1L, "Laptop", 999.99, 50, "Electronics", true);
-                insertProduct(2L, "Mouse", 29.99, 200, "Electronics", true);
-                insertProduct(3L, "Keyboard", 79.99, 150, "Electronics", true);
-                insertProduct(4L, "Monitor", 299.99, 75, "Electronics", false);
-                insertProduct(5L, "Desk", 199.99, 30, "Furniture", true);
-                insertProduct(6L, "Chair", 149.99, 45, "Furniture", true);
-                insertProduct(7L, "Headphones", 89.99, 100, "Electronics", true);
-                insertProduct(8L, "Webcam", 59.99, 80, "Electronics", false);
-                insertProduct(9L, "Bookshelf", 129.99, 20, "Furniture", true);
-                insertProduct(10L, "Lamp", 39.99, 60, "Furniture", true);
-                insertProduct(11L, "Clean Code", 45.99, 100, "Books", true);
-                insertProduct(12L, "Design Patterns", 54.99, 75, "Books", false);
-            }
+            // Always create fresh DB for this nested class
+            nestedTempDbPath = Files.createTempFile("query_test_nested", ".deskdb");
+            db = DeskDB.open(nestedTempDbPath);
+            db.createTable("products",
+                new Column("id", DataType.LONG).primaryKey(),
+                new Column("name", DataType.STRING),
+                new Column("price", DataType.DOUBLE),
+                new Column("quantity", DataType.INT),
+                new Column("category", DataType.STRING),
+                new Column("active", DataType.BOOLEAN)
+            );
+            table = db.getTable("products");
+            insertProduct(1L, "Laptop", 999.99, 50, "Electronics", true);
+            insertProduct(2L, "Mouse", 29.99, 200, "Electronics", true);
+            insertProduct(3L, "Keyboard", 79.99, 150, "Electronics", true);
+            insertProduct(4L, "Monitor", 299.99, 75, "Electronics", false);
+            insertProduct(5L, "Desk", 199.99, 30, "Furniture", true);
+            insertProduct(6L, "Chair", 149.99, 45, "Furniture", true);
+            insertProduct(7L, "Headphones", 89.99, 100, "Electronics", true);
+            insertProduct(8L, "Webcam", 59.99, 80, "Electronics", false);
+            insertProduct(9L, "Bookshelf", 129.99, 20, "Furniture", true);
+            insertProduct(10L, "Lamp", 39.99, 60, "Furniture", true);
+            insertProduct(11L, "Clean Code", 45.99, 100, "Books", true);
+            insertProduct(12L, "Design Patterns", 54.99, 75, "Books", false);
+            
             assertNotNull(db, "Database should be initialized");
             assertNotNull(table, "Table should be initialized");
+        }
+        
+        @AfterEach
+        void tearDown() throws Exception {
+            if (db != null && !db.isClosed()) {
+                db.close();
+            }
+            if (nestedTempDbPath != null && Files.exists(nestedTempDbPath)) {
+                Files.delete(nestedTempDbPath);
+            }
         }
         
         @Test
@@ -223,36 +234,47 @@ public class QueryEngineIntegrationTest {
     @DisplayName("QueryPlan Tests")
     class QueryPlanTests {
         
+        private Path nestedTempDbPath;
+        
         @BeforeEach
         void setUp() throws Exception {
-            // Re-initialize for nested test class
-            if (db == null || db.isClosed()) {
-                tempDbPath = Files.createTempFile("query_test", ".deskdb");
-                db = DeskDB.open(tempDbPath);
-                db.createTable("products",
-                    new Column("id", DataType.LONG).primaryKey(),
-                    new Column("name", DataType.STRING),
-                    new Column("price", DataType.DOUBLE),
-                    new Column("quantity", DataType.INT),
-                    new Column("category", DataType.STRING),
-                    new Column("active", DataType.BOOLEAN)
-                );
-                table = db.getTable("products");
-                insertProduct(1L, "Laptop", 999.99, 50, "Electronics", true);
-                insertProduct(2L, "Mouse", 29.99, 200, "Electronics", true);
-                insertProduct(3L, "Keyboard", 79.99, 150, "Electronics", true);
-                insertProduct(4L, "Monitor", 299.99, 75, "Electronics", false);
-                insertProduct(5L, "Desk", 199.99, 30, "Furniture", true);
-                insertProduct(6L, "Chair", 149.99, 45, "Furniture", true);
-                insertProduct(7L, "Headphones", 89.99, 100, "Electronics", true);
-                insertProduct(8L, "Webcam", 59.99, 80, "Electronics", false);
-                insertProduct(9L, "Bookshelf", 129.99, 20, "Furniture", true);
-                insertProduct(10L, "Lamp", 39.99, 60, "Furniture", true);
-                insertProduct(11L, "Clean Code", 45.99, 100, "Books", true);
-                insertProduct(12L, "Design Patterns", 54.99, 75, "Books", false);
-            }
+            // Always create fresh DB for this nested class
+            nestedTempDbPath = Files.createTempFile("query_test_nested2", ".deskdb");
+            db = DeskDB.open(nestedTempDbPath);
+            db.createTable("products",
+                new Column("id", DataType.LONG).primaryKey(),
+                new Column("name", DataType.STRING),
+                new Column("price", DataType.DOUBLE),
+                new Column("quantity", DataType.INT),
+                new Column("category", DataType.STRING),
+                new Column("active", DataType.BOOLEAN)
+            );
+            table = db.getTable("products");
+            insertProduct(1L, "Laptop", 999.99, 50, "Electronics", true);
+            insertProduct(2L, "Mouse", 29.99, 200, "Electronics", true);
+            insertProduct(3L, "Keyboard", 79.99, 150, "Electronics", true);
+            insertProduct(4L, "Monitor", 299.99, 75, "Electronics", false);
+            insertProduct(5L, "Desk", 199.99, 30, "Furniture", true);
+            insertProduct(6L, "Chair", 149.99, 45, "Furniture", true);
+            insertProduct(7L, "Headphones", 89.99, 100, "Electronics", true);
+            insertProduct(8L, "Webcam", 59.99, 80, "Electronics", false);
+            insertProduct(9L, "Bookshelf", 129.99, 20, "Furniture", true);
+            insertProduct(10L, "Lamp", 39.99, 60, "Furniture", true);
+            insertProduct(11L, "Clean Code", 45.99, 100, "Books", true);
+            insertProduct(12L, "Design Patterns", 54.99, 75, "Books", false);
+            
             assertNotNull(db, "Database should be initialized");
             assertNotNull(table, "Table should be initialized");
+        }
+        
+        @AfterEach
+        void tearDown() throws Exception {
+            if (db != null && !db.isClosed()) {
+                db.close();
+            }
+            if (nestedTempDbPath != null && Files.exists(nestedTempDbPath)) {
+                Files.delete(nestedTempDbPath);
+            }
         }
         
         @Test
@@ -317,36 +339,47 @@ public class QueryEngineIntegrationTest {
     @DisplayName("SelectBuilder Integration Tests")
     class SelectBuilderIntegrationTests {
         
+        private Path nestedTempDbPath;
+        
         @BeforeEach
         void setUp() throws Exception {
-            // Re-initialize for nested test class
-            if (db == null || db.isClosed()) {
-                tempDbPath = Files.createTempFile("query_test", ".deskdb");
-                db = DeskDB.open(tempDbPath);
-                db.createTable("products",
-                    new Column("id", DataType.LONG).primaryKey(),
-                    new Column("name", DataType.STRING),
-                    new Column("price", DataType.DOUBLE),
-                    new Column("quantity", DataType.INT),
-                    new Column("category", DataType.STRING),
-                    new Column("active", DataType.BOOLEAN)
-                );
-                table = db.getTable("products");
-                insertProduct(1L, "Laptop", 999.99, 50, "Electronics", true);
-                insertProduct(2L, "Mouse", 29.99, 200, "Electronics", true);
-                insertProduct(3L, "Keyboard", 79.99, 150, "Electronics", true);
-                insertProduct(4L, "Monitor", 299.99, 75, "Electronics", false);
-                insertProduct(5L, "Desk", 199.99, 30, "Furniture", true);
-                insertProduct(6L, "Chair", 149.99, 45, "Furniture", true);
-                insertProduct(7L, "Headphones", 89.99, 100, "Electronics", true);
-                insertProduct(8L, "Webcam", 59.99, 80, "Electronics", false);
-                insertProduct(9L, "Bookshelf", 129.99, 20, "Furniture", true);
-                insertProduct(10L, "Lamp", 39.99, 60, "Furniture", true);
-                insertProduct(11L, "Clean Code", 45.99, 100, "Books", true);
-                insertProduct(12L, "Design Patterns", 54.99, 75, "Books", false);
-            }
+            // Always create fresh DB for this nested class
+            nestedTempDbPath = Files.createTempFile("query_test_nested3", ".deskdb");
+            db = DeskDB.open(nestedTempDbPath);
+            db.createTable("products",
+                new Column("id", DataType.LONG).primaryKey(),
+                new Column("name", DataType.STRING),
+                new Column("price", DataType.DOUBLE),
+                new Column("quantity", DataType.INT),
+                new Column("category", DataType.STRING),
+                new Column("active", DataType.BOOLEAN)
+            );
+            table = db.getTable("products");
+            insertProduct(1L, "Laptop", 999.99, 50, "Electronics", true);
+            insertProduct(2L, "Mouse", 29.99, 200, "Electronics", true);
+            insertProduct(3L, "Keyboard", 79.99, 150, "Electronics", true);
+            insertProduct(4L, "Monitor", 299.99, 75, "Electronics", false);
+            insertProduct(5L, "Desk", 199.99, 30, "Furniture", true);
+            insertProduct(6L, "Chair", 149.99, 45, "Furniture", true);
+            insertProduct(7L, "Headphones", 89.99, 100, "Electronics", true);
+            insertProduct(8L, "Webcam", 59.99, 80, "Electronics", false);
+            insertProduct(9L, "Bookshelf", 129.99, 20, "Furniture", true);
+            insertProduct(10L, "Lamp", 39.99, 60, "Furniture", true);
+            insertProduct(11L, "Clean Code", 45.99, 100, "Books", true);
+            insertProduct(12L, "Design Patterns", 54.99, 75, "Books", false);
+            
             assertNotNull(db, "Database should be initialized");
             assertNotNull(table, "Table should be initialized");
+        }
+        
+        @AfterEach
+        void tearDown() throws Exception {
+            if (db != null && !db.isClosed()) {
+                db.close();
+            }
+            if (nestedTempDbPath != null && Files.exists(nestedTempDbPath)) {
+                Files.delete(nestedTempDbPath);
+            }
         }
         
         @Test
@@ -617,36 +650,47 @@ public class QueryEngineIntegrationTest {
     @DisplayName("Complex Query Scenarios")
     class ComplexQueryScenarios {
         
+        private Path nestedTempDbPath;
+        
         @BeforeEach
         void setUp() throws Exception {
-            // Re-initialize for nested test class
-            if (db == null || db.isClosed()) {
-                tempDbPath = Files.createTempFile("query_test", ".deskdb");
-                db = DeskDB.open(tempDbPath);
-                db.createTable("products",
-                    new Column("id", DataType.LONG).primaryKey(),
-                    new Column("name", DataType.STRING),
-                    new Column("price", DataType.DOUBLE),
-                    new Column("quantity", DataType.INT),
-                    new Column("category", DataType.STRING),
-                    new Column("active", DataType.BOOLEAN)
-                );
-                table = db.getTable("products");
-                insertProduct(1L, "Laptop", 999.99, 50, "Electronics", true);
-                insertProduct(2L, "Mouse", 29.99, 200, "Electronics", true);
-                insertProduct(3L, "Keyboard", 79.99, 150, "Electronics", true);
-                insertProduct(4L, "Monitor", 299.99, 75, "Electronics", false);
-                insertProduct(5L, "Desk", 199.99, 30, "Furniture", true);
-                insertProduct(6L, "Chair", 149.99, 45, "Furniture", true);
-                insertProduct(7L, "Headphones", 89.99, 100, "Electronics", true);
-                insertProduct(8L, "Webcam", 59.99, 80, "Electronics", false);
-                insertProduct(9L, "Bookshelf", 129.99, 20, "Furniture", true);
-                insertProduct(10L, "Lamp", 39.99, 60, "Furniture", true);
-                insertProduct(11L, "Clean Code", 45.99, 100, "Books", true);
-                insertProduct(12L, "Design Patterns", 54.99, 75, "Books", false);
-            }
+            // Always create fresh DB for this nested class
+            nestedTempDbPath = Files.createTempFile("query_test_nested4", ".deskdb");
+            db = DeskDB.open(nestedTempDbPath);
+            db.createTable("products",
+                new Column("id", DataType.LONG).primaryKey(),
+                new Column("name", DataType.STRING),
+                new Column("price", DataType.DOUBLE),
+                new Column("quantity", DataType.INT),
+                new Column("category", DataType.STRING),
+                new Column("active", DataType.BOOLEAN)
+            );
+            table = db.getTable("products");
+            insertProduct(1L, "Laptop", 999.99, 50, "Electronics", true);
+            insertProduct(2L, "Mouse", 29.99, 200, "Electronics", true);
+            insertProduct(3L, "Keyboard", 79.99, 150, "Electronics", true);
+            insertProduct(4L, "Monitor", 299.99, 75, "Electronics", false);
+            insertProduct(5L, "Desk", 199.99, 30, "Furniture", true);
+            insertProduct(6L, "Chair", 149.99, 45, "Furniture", true);
+            insertProduct(7L, "Headphones", 89.99, 100, "Electronics", true);
+            insertProduct(8L, "Webcam", 59.99, 80, "Electronics", false);
+            insertProduct(9L, "Bookshelf", 129.99, 20, "Furniture", true);
+            insertProduct(10L, "Lamp", 39.99, 60, "Furniture", true);
+            insertProduct(11L, "Clean Code", 45.99, 100, "Books", true);
+            insertProduct(12L, "Design Patterns", 54.99, 75, "Books", false);
+            
             assertNotNull(db, "Database should be initialized");
             assertNotNull(table, "Table should be initialized");
+        }
+        
+        @AfterEach
+        void tearDown() throws Exception {
+            if (db != null && !db.isClosed()) {
+                db.close();
+            }
+            if (nestedTempDbPath != null && Files.exists(nestedTempDbPath)) {
+                Files.delete(nestedTempDbPath);
+            }
         }
         
         @Test
@@ -728,36 +772,47 @@ public class QueryEngineIntegrationTest {
     @DisplayName("WhereCondition Tests - Testing andWhere() for multiple conditions")
     class WhereConditionTests {
         
+        private Path nestedTempDbPath;
+        
         @BeforeEach
         void setUp() throws Exception {
-            // Re-initialize for nested test class
-            if (db == null || db.isClosed()) {
-                tempDbPath = Files.createTempFile("query_test", ".deskdb");
-                db = DeskDB.open(tempDbPath);
-                db.createTable("products",
-                    new Column("id", DataType.LONG).primaryKey(),
-                    new Column("name", DataType.STRING),
-                    new Column("price", DataType.DOUBLE),
-                    new Column("quantity", DataType.INT),
-                    new Column("category", DataType.STRING),
-                    new Column("active", DataType.BOOLEAN)
-                );
-                table = db.getTable("products");
-                insertProduct(1L, "Laptop", 999.99, 50, "Electronics", true);
-                insertProduct(2L, "Mouse", 29.99, 200, "Electronics", true);
-                insertProduct(3L, "Keyboard", 79.99, 150, "Electronics", true);
-                insertProduct(4L, "Monitor", 299.99, 75, "Electronics", false);
-                insertProduct(5L, "Desk", 199.99, 30, "Furniture", true);
-                insertProduct(6L, "Chair", 149.99, 45, "Furniture", true);
-                insertProduct(7L, "Headphones", 89.99, 100, "Electronics", true);
-                insertProduct(8L, "Webcam", 59.99, 80, "Electronics", false);
-                insertProduct(9L, "Bookshelf", 129.99, 20, "Furniture", true);
-                insertProduct(10L, "Lamp", 39.99, 60, "Furniture", true);
-                insertProduct(11L, "Clean Code", 45.99, 100, "Books", true);
-                insertProduct(12L, "Design Patterns", 54.99, 75, "Books", false);
-            }
+            // Always create fresh DB for this nested class
+            nestedTempDbPath = Files.createTempFile("query_test_nested5", ".deskdb");
+            db = DeskDB.open(nestedTempDbPath);
+            db.createTable("products",
+                new Column("id", DataType.LONG).primaryKey(),
+                new Column("name", DataType.STRING),
+                new Column("price", DataType.DOUBLE),
+                new Column("quantity", DataType.INT),
+                new Column("category", DataType.STRING),
+                new Column("active", DataType.BOOLEAN)
+            );
+            table = db.getTable("products");
+            insertProduct(1L, "Laptop", 999.99, 50, "Electronics", true);
+            insertProduct(2L, "Mouse", 29.99, 200, "Electronics", true);
+            insertProduct(3L, "Keyboard", 79.99, 150, "Electronics", true);
+            insertProduct(4L, "Monitor", 299.99, 75, "Electronics", false);
+            insertProduct(5L, "Desk", 199.99, 30, "Furniture", true);
+            insertProduct(6L, "Chair", 149.99, 45, "Furniture", true);
+            insertProduct(7L, "Headphones", 89.99, 100, "Electronics", true);
+            insertProduct(8L, "Webcam", 59.99, 80, "Electronics", false);
+            insertProduct(9L, "Bookshelf", 129.99, 20, "Furniture", true);
+            insertProduct(10L, "Lamp", 39.99, 60, "Furniture", true);
+            insertProduct(11L, "Clean Code", 45.99, 100, "Books", true);
+            insertProduct(12L, "Design Patterns", 54.99, 75, "Books", false);
+            
             assertNotNull(db, "Database should be initialized");
             assertNotNull(table, "Table should be initialized");
+        }
+        
+        @AfterEach
+        void tearDown() throws Exception {
+            if (db != null && !db.isClosed()) {
+                db.close();
+            }
+            if (nestedTempDbPath != null && Files.exists(nestedTempDbPath)) {
+                Files.delete(nestedTempDbPath);
+            }
         }
         
         @Test
