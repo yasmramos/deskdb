@@ -98,7 +98,7 @@ public class ObjectStore {
     /**
      * Internal initialization method called by DeskDB after loading data.
      */
-    void initialize() {
+    public void initialize() {
         if (!inMemoryOnly) {
             initializeInternalTable();
             loadAllToCache();  // Pre-load cache on startup
