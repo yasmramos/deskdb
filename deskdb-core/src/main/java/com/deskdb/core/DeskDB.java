@@ -525,8 +525,8 @@ public class DeskDB implements AutoCloseable {
 
     @SuppressWarnings("unchecked")
     private void loadFromFile() throws IOException {
-        // Use read lock to allow concurrent reads during load
-        dbLock.readLock().lock();
+        // Use write lock since we're modifying data structures during load
+        dbLock.writeLock().lock();
         try {
             byte[] content = Files.readAllBytes(dbPath);
             if (content.length > 0) {
@@ -555,6 +555,7 @@ public class DeskDB implements AutoCloseable {
                     Table table = new Table(tableName, List.of(columns), dbPath.toString());
                     table.setDb(this);
                     tables.put(tableName, table);
+                    indexes.put(tableName, new ConcurrentHashMap<>());
                 }
                 
                 // Read data if exists
@@ -602,7 +603,7 @@ public class DeskDB implements AutoCloseable {
         } catch (Exception e) {
             logger.warn("Error loading existing data, starting with empty DB: {}", e.getMessage(), e);
         } finally {
-            dbLock.readLock().unlock();
+            dbLock.writeLock().unlock();
         }
     }
     
