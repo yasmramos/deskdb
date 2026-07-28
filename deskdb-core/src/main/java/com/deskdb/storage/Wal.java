@@ -36,10 +36,11 @@ public class Wal implements AutoCloseable {
     private static final byte[] MAGIC_BYTES = "DESKDB_WAL".getBytes();
     private static final int HEADER_SIZE = 20; // 10 magic + 4 version + 4 checksum + 2 length
     
-    // Configuración de buffering
-    private static final int DEFAULT_BUFFER_SIZE = 1024; // Número máximo de entradas en buffer
-    private static final long FLUSH_INTERVAL_MS = 5; // Intervalo de flush en ms
-    private static final int BATCH_COMMIT_THRESHOLD = 100; // Commit después de N operaciones
+    // Configuración de buffering optimizada para alto rendimiento
+    private static final int DEFAULT_BUFFER_SIZE = 2048; // Número máximo de entradas en buffer (duplicado)
+    private static final long FLUSH_INTERVAL_MS = 2; // Intervalo de flush en ms (reducido de 5ms)
+    private static final int BATCH_COMMIT_THRESHOLD = 200; // Commit después de N operaciones (duplicado)
+    private static final int MIN_BATCH_SIZE = 10; // Mínimo de entradas para hacer flush eficiente
     
     private final Path walPath;
     private final FileChannel channel;
@@ -237,7 +238,7 @@ public class Wal implements AutoCloseable {
     }
     
     /**
-     * Realiza el flush de todas las entradas bufferizadas al disco
+     * Realiza el flush de todas las entradas bufferizadas al disco con batching optimizado
      */
     private synchronized void doFlush() throws IOException {
         if (writeBuffer.isEmpty() && pendingOperations == 0) {
@@ -247,11 +248,20 @@ public class Wal implements AutoCloseable {
         List<WalEntry> batch = new ArrayList<>();
         writeBuffer.drainTo(batch, BATCH_COMMIT_THRESHOLD);
         
+        // Skip flush if batch is too small (unless we have pending operations waiting)
+        if (batch.size() < MIN_BATCH_SIZE && pendingOperations > BATCH_COMMIT_THRESHOLD) {
+            return; // Wait for more entries to accumulate
+        }
+        
         if (batch.isEmpty() && pendingOperations > 0) {
             // No hay entradas nuevas pero hay operaciones pendientes
             // Esto puede pasar si las entradas ya fueron escritas pero no flushed
             channel.force(false);
             pendingOperations = 0;
+            return;
+        }
+        
+        if (batch.isEmpty()) {
             return;
         }
         
@@ -264,12 +274,10 @@ public class Wal implements AutoCloseable {
         }
         
         // Forzar escritura al disco solo una vez por batch
-        if (!batch.isEmpty()) {
-            channel.force(false);
-            pendingOperations = Math.max(0, pendingOperations - batch.size());
-        }
+        channel.force(false);
+        pendingOperations = Math.max(0, pendingOperations - batch.size());
         
-        logger.debug("Flushed {} entries to WAL", batch.size());
+        logger.debug("Flushed {} entries to WAL (total pending: {})", batch.size(), pendingOperations);
     }
     
     /**
