@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * Punto de entrada principal para DeskDB.
@@ -39,6 +40,7 @@ public class DeskDB implements AutoCloseable {
     private Wal wal;
     private boolean closed = false;
     private final AtomicInteger transactionCounter = new AtomicInteger(0);
+    private final ReentrantReadWriteLock dbLock = new ReentrantReadWriteLock();
 
     public String getFilePath() {
         return dbPath.toString();
@@ -523,13 +525,15 @@ public class DeskDB implements AutoCloseable {
 
     @SuppressWarnings("unchecked")
     private void loadFromFile() throws IOException {
+        // Use read lock to allow concurrent reads during load
+        dbLock.readLock().lock();
         try {
             byte[] content = Files.readAllBytes(dbPath);
             if (content.length > 0) {
                 ByteArrayInputStream bais = new ByteArrayInputStream(content);
                 DataInputStream in = new DataInputStream(bais);
                 
-                // Leer número de esquemas
+                // Read number of schemas
                 int schemaCount = in.readInt();
                 for (int i = 0; i < schemaCount; i++) {
                     String tableName = in.readUTF();
@@ -547,13 +551,13 @@ public class DeskDB implements AutoCloseable {
                     TableSchema schema = new TableSchema(tableName, List.of(columns));
                     schemas.put(tableName, schema);
                     
-                    // Crear tabla
+                    // Create table
                     Table table = new Table(tableName, List.of(columns), dbPath.toString());
                     table.setDb(this);
                     tables.put(tableName, table);
                 }
                 
-                // Leer datos si existen
+                // Read data if exists
                 if (in.available() >= 4) {
                     int dataLength = in.readInt();
                     if (dataLength > 0 && in.available() >= dataLength) {
@@ -563,7 +567,7 @@ public class DeskDB implements AutoCloseable {
                         ByteArrayInputStream dataBais = new ByteArrayInputStream(dataContent);
                         DataInputStream dataIn = new DataInputStream(dataBais);
                         
-                        // Leer datos de cada tabla
+                        // Read data from each table
                         while (dataIn.available() > 0) {
                             String tableName = dataIn.readUTF();
                             int rowCount = dataIn.readInt();
@@ -588,15 +592,17 @@ public class DeskDB implements AutoCloseable {
                         }
                         
                         dataIn.close();
-                        logger.info("Datos cargados desde archivo");
+                        logger.info("Data loaded from file");
                     }
                 }
                 
                 in.close();
-                logger.info("Esquemas y datos cargados desde {}", dbPath);
+                logger.info("Schemas and data loaded from {}", dbPath);
             }
         } catch (Exception e) {
-            logger.warn("Error al cargar datos existentes, comenzando con DB vacía: {}", e.getMessage(), e);
+            logger.warn("Error loading existing data, starting with empty DB: {}", e.getMessage(), e);
+        } finally {
+            dbLock.readLock().unlock();
         }
     }
     
@@ -619,21 +625,23 @@ public class DeskDB implements AutoCloseable {
     }
 
     private void saveToFile() throws IOException {
-        synchronized (this) {
-            // Primero guardar datos de todas las tablas en el archivo principal
+        // Use write lock for exclusive access during save
+        dbLock.writeLock().lock();
+        try {
+            // First save all table data to the main file
             ByteArrayOutputStream dataBaos = new ByteArrayOutputStream();
             DataOutputStream dataOut = new DataOutputStream(dataBaos);
             
-            // Guardar datos de cada tabla directamente del ConcurrentHashMap para evitar OOM
+            // Save data from each table directly from ConcurrentHashMap to avoid OOM
             for (Map.Entry<String, Table> entry : tables.entrySet()) {
                 Table table = entry.getValue();
                 Map<Long, Row> tableData = getTableData(table);
                 
-                // Escribir nombre de tabla
+                // Write table name
                 dataOut.writeUTF(entry.getKey());
                 dataOut.writeInt(tableData.size());
                 
-                // Escribir cada fila directamente del mapa interno
+                // Write each row directly from internal map
                 for (Map.Entry<Long, Row> rowEntry : tableData.entrySet()) {
                     Row row = rowEntry.getValue();
                     dataOut.writeLong(row.getRowId());
@@ -648,19 +656,19 @@ public class DeskDB implements AutoCloseable {
             dataOut.close();
             byte[] dataContent = dataBaos.toByteArray();
             
-            // Ahora guardar esquemas + datos concatenados
+            // Now save schemas + concatenated data
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             DataOutputStream out = new DataOutputStream(baos);
             
-            // Guardar número de esquemas
+            // Save number of schemas
             out.writeInt(schemas.size());
             
-            // Guardar cada esquema
+            // Save each schema
             for (Map.Entry<String, TableSchema> entry : schemas.entrySet()) {
                 TableSchema schema = entry.getValue();
                 out.writeUTF(entry.getKey());
                 
-                // Guardar columnas del esquema
+                // Save schema columns
                 List<Column> columns = schema.getColumnsList();
                 out.writeInt(columns.size());
                 for (Column col : columns) {
@@ -671,14 +679,16 @@ public class DeskDB implements AutoCloseable {
                 }
             }
             
-            // Guardar longitud y contenido de los datos
+            // Save data length and content
             out.writeInt(dataContent.length);
             out.write(dataContent);
             
             out.close();
             byte[] content = baos.toByteArray();
             Files.write(dbPath, content);
-            logger.debug("Base de datos guardada en {}", dbPath);
+            logger.debug("Database saved to {}", dbPath);
+        } finally {
+            dbLock.writeLock().unlock();
         }
     }
     
