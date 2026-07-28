@@ -1,15 +1,43 @@
 # DeskDB
 
-High-performance embedded columnar database for Java with ACID transactions, advanced query engine, and ORM support.
+High-performance embedded hybrid database for Java with SQL + Object Persistence, ACID transactions, and advanced query engine.
 
 ## Features
 
 ### Core Capabilities
+- **Hybrid Engine**: SQL relational tables + Direct Java Object persistence in a single file
 - **Fluid API**: Intuitive chainable interface for CRUD operations
 - **Columnar Storage**: Optimized for analytical queries and partial reads
 - **Single File Persistence**: Portable `.deskdb` format with checksums
 - **Type-Safe**: Strong typing with 9 supported data types
 - **Zero External Dependencies**: Pure Java (only SLF4J for logging)
+
+### Object Persistence API (No SQL Required)
+- **Direct Object Storage**: Save and retrieve Java objects without defining schemas
+- **Auto ID Generation**: Automatic unique ID generation per class type
+- **Type Safety**: Compile-time type checking with generics
+- **Transparent Serialization**: Objects stored as BLOBs with class validation
+
+```java
+DeskDB db = DeskDB.open("mydb.deskdb");
+
+// Persist objects directly
+Person person = new Person("John", "Doe", 30);
+db.persist(person); // Auto-generates ID
+
+// Retrieve by ID
+Person found = db.find(Person.class, 1L);
+
+// Query all objects of a type
+List<Person> all = db.findAll(Person.class);
+
+// Update object
+found.setAge(31);
+db.update(found);
+
+// Delete object
+db.remove(Person.class, 1L);
+```
 
 ### Advanced Query Engine
 - **Complex Filters**: Support for AND/OR logical operators with nested conditions
@@ -24,6 +52,7 @@ High-performance embedded columnar database for Java with ACID transactions, adv
 - **Transaction Isolation**: MVCC (Multi-Version Concurrency Control) with snapshot isolation
 - **Granular Locking**: ReentrantReadWriteLock for fine-grained table-level concurrency
 - **Atomic Operations**: All-or-nothing transaction semantics
+- **Unified Storage**: Objects and SQL tables share the same WAL for cross-operation ACID guarantees
 
 ### Indexing & Performance
 - **B-Tree Indexes**: Automatic indexing on primary keys
@@ -37,7 +66,7 @@ High-performance embedded columnar database for Java with ACID transactions, adv
 - **Cascade Operations**: Automatic cascade persist, merge, remove
 - **Lifecycle Callbacks**: @PrePersist, @PostPersist, @PreUpdate, @PostUpdate, @PreRemove, @PostRemove
 - **Field Validation**: @NotNull, @Size, @Min, @Max annotations
-- **EntityManager**: Full-featured entity manager with automatic schema generation
+- **Dual Approach**: Use EntityManager for SQL-based ORM or direct Object Persistence for schema-less storage
 
 ### JDBC Compatibility
 - **JDBC Driver**: Standard JDBC interface (Connection, Statement, PreparedStatement, ResultSet)
@@ -67,8 +96,45 @@ db.table("users")
   .value("age", 30)
   .value("email", "ana@example.com")
   .execute();
+```
 
-// Or use ORM with entity annotations (recommended for structured data)
+### Object Persistence (Recommended for Simple Use Cases)
+
+For straightforward Java object storage without SQL overhead:
+
+```java
+// Define your POJO (no annotations required)
+public class Person {
+    private String firstName;
+    private String lastName;
+    private int age;
+    
+    // constructors, getters, setters
+}
+
+// Persist objects directly
+Person person = new Person("John", "Doe", 30);
+db.persist(person); // Auto-generates unique ID
+
+// Retrieve by ID
+Person found = db.find(Person.class, 1L);
+
+// Query all objects of a type
+List<Person> all = db.findAll(Person.class);
+
+// Update object
+found.setAge(31);
+db.update(found);
+
+// Delete object
+db.remove(Person.class, 1L);
+```
+
+### ORM with Entity Annotations (For Complex Relationships)
+
+When you need relationships, validation, or SQL queries:
+
+```java
 @Entity
 @Table(name = "products")
 public class Product {
