@@ -624,7 +624,12 @@ public class DeskDB implements AutoCloseable {
         }
     }
 
-    private void saveToFile() throws IOException {
+    /**
+     * Saves the database to disk.
+     * Package-private for ObjectStore access.
+     * @throws IOException if there is an IO error
+     */
+    void saveToFile() throws IOException {
         // Use write lock for exclusive access during save
         dbLock.writeLock().lock();
         try {

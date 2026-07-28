@@ -98,6 +98,9 @@ public class ObjectStore {
                 
                 // Create composite index for fast lookups: class_name + id
                 db.createIndex(INTERNAL_TABLE_NAME, "idx_class_id", "class_name,id");
+                
+                // Save immediately after creating table to ensure consistency
+                db.saveToFile();
             }
         } catch (IOException e) {
             throw new RuntimeException("Failed to initialize internal object store table", e);
