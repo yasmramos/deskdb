@@ -388,4 +388,100 @@ public class BTree<K extends Comparable<K>, V> {
             }
         }
     }
+    
+    /**
+     * Interface functional para traversal de rangos.
+     */
+    @FunctionalInterface
+    public interface EntryVisitor<K, V> {
+        void visit(Map.Entry<K, List<Long>> entry);
+    }
+    
+    /**
+     * Recorre un rango de valores en el B-Tree usando el índice.
+     * Optimizado para lecturas por rango rápidas sin escaneo completo.
+     * 
+     * @param min Valor mínimo del rango (null para sin límite inferior)
+     * @param max Valor máximo del rango (null para sin límite superior)
+     * @param includeMin Incluir el valor mínimo si existe (para GTE/LTE)
+     * @param includeMax Incluir el valor máximo si existe (para GTE/LTE)
+     * @param visitor Función para procesar cada entrada encontrada
+     */
+    @SuppressWarnings("unchecked")
+    public void traverseInRange(K min, K max, boolean includeMin, boolean includeMax, EntryVisitor<K, V> visitor) {
+        traverseInRange(root, min, max, includeMin, includeMax, visitor);
+    }
+    
+    @SuppressWarnings("unchecked")
+    private void traverseInRange(Node node, K min, K max, boolean includeMin, boolean includeMax, EntryVisitor<K, V> visitor) {
+        if (node == null) return;
+        
+        // Encontrar el primer índice que >= min (o el primero si min es null)
+        int i = 0;
+        if (min != null) {
+            while (i < node.keyCount && ((K) node.keys[i]).compareTo(min) < 0) {
+                i++;
+            }
+        }
+        
+        // Si es nodo hoja, procesar las claves en el rango
+        if (node.isLeaf) {
+            while (i < node.keyCount) {
+                K key = (K) node.keys[i];
+                
+                // Verificar si superamos el máximo
+                if (max != null && key.compareTo(max) > 0) {
+                    break;
+                }
+                
+                // Verificar inclusión de límites
+                boolean matchesMin = (min == null) || (includeMin ? key.compareTo(min) >= 0 : key.compareTo(min) > 0);
+                boolean matchesMax = (max == null) || (includeMax ? key.compareTo(max) <= 0 : key.compareTo(max) < 0);
+                
+                if (matchesMin && matchesMax) {
+                    // Crear entry con la lista de valores
+                    List<Long> values = new ArrayList<>();
+                    for (int v = 0; v < node.values.length && node.values[v] != 0; v++) {
+                        if (((K) node.keys[i]).equals(key)) {
+                            values.add(node.values[v]);
+                        }
+                    }
+                    
+                    if (!values.isEmpty()) {
+                        Map.Entry<K, List<Long>> entry = new AbstractMap.SimpleEntry<>(key, values);
+                        visitor.visit(entry);
+                    }
+                }
+                
+                i++;
+            }
+        } else {
+            // Nodo interno: recorrer hijos recursivamente
+            int childCount = node.keyCount + 1;
+            for (int j = 0; j < childCount && j < node.children.length; j++) {
+                if (node.children[j] != null) {
+                    // Verificar si este hijo puede estar dentro del rango
+                    boolean mayContainInRange = true;
+                    
+                    if (min != null && j < node.keyCount) {
+                        K childKey = (K) node.keys[j];
+                        if (childKey.compareTo(min) < 0) {
+                            mayContainInRange = false;
+                        }
+                    }
+                    
+                    if (max != null && j > 0 && j - 1 < node.keyCount) {
+                        K childKey = (K) node.keys[j - 1];
+                        if (childKey.compareTo(max) > 0) {
+                            mayContainInRange = false;
+                        }
+                    }
+                    
+                    if (mayContainInRange) {
+                        traverseInRange(node.children[j], min, max, includeMin, includeMax, visitor);
+                    }
+                }
+            }
+        }
+    }
 }
