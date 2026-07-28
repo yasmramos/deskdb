@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 public class InsertBuilder {
     private final Table table;
@@ -33,6 +34,15 @@ public class InsertBuilder {
     public InsertBuilder value(String column, Object value) {
         currentValues.put(column, value);
         return this;
+    }
+    
+    /**
+     * Fluent API for setting values using a consumer function.
+     * Example: .values(user -> user.set("name", "John").set("age", 30))
+     */
+    public InsertBuilder values(Consumer<InsertBuilder> consumer) {
+        consumer.accept(this);
+        return addRow();
     }
 
     /**

@@ -38,22 +38,43 @@ class TimeTravelTest {
 
     @BeforeEach
     void setupTest() throws Exception {
-        // Create users table for testing
+        // Create users table for testing using fluent API
         try {
-            db.execute("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100), age INT)");
+            db.table("users")
+                .create()
+                .column("id", DataType.INT).primaryKey()
+                .column("name", DataType.VARCHAR, 100)
+                .column("age", DataType.INT)
+                .execute();
         } catch (Exception e) {
             // Table might already exist, ignore
         }
         
-        // Insert initial data
-        db.execute("INSERT INTO users (id, name, age) VALUES (1, 'John', 25)");
-        db.execute("INSERT INTO users (id, name, age) VALUES (2, 'Jane', 30)");
+        // Insert initial data using fluent API
+        db.table("users")
+            .insert()
+            .values(row -> row
+                .value("id", 1)
+                .value("name", "John")
+                .value("age", 25))
+            .execute();
+            
+        db.table("users")
+            .insert()
+            .values(row -> row
+                .value("id", 2)
+                .value("name", "Jane")
+                .value("age", 30))
+            .execute();
     }
 
     @AfterEach
     void cleanupTest() throws Exception {
         try {
-            db.execute("DELETE FROM users WHERE id > 0");
+            db.table("users")
+                .delete()
+                .where("id").gt(0)
+                .execute();
         } catch (Exception e) {
             // Ignore cleanup errors
         }
@@ -199,8 +220,14 @@ class TimeTravelTest {
     @Test
     @DisplayName("Should handle multiple rows in history query")
     void shouldHandleMultipleRows() throws Exception {
-        // Insert more test data
-        db.execute("INSERT INTO users (id, name, age) VALUES (3, 'Bob', 35)");
+        // Insert more test data using fluent API
+        db.table("users")
+            .insert()
+            .values(row -> row
+                .value("id", 3)
+                .value("name", "Bob")
+                .value("age", 35))
+            .execute();
         
         List<RowVersion> versions = db.table("users")
             .history()
