@@ -114,6 +114,7 @@ public class Table {
         Optional<BTree> indexOpt = Optional.empty();
         Filter bestFilter = null;
         
+        // Buscar el mejor índice disponible para cualquier filtro
         for (Filter f : filters) {
             if (hasIndex(f.getColumn())) {
                 indexOpt = Optional.of(getIndex(f.getColumn()));
@@ -122,20 +123,27 @@ public class Table {
             }
         }
 
+        // Si hay índice y es un filtro de rango (GT, LT, GTE, LTE, BETWEEN), usarlo
         if (indexOpt.isPresent() && bestFilter != null) {
             BTree index = indexOpt.get();
             List<Long> rowIds;
             final Filter filterToApply = bestFilter;
 
             if (bestFilter.getOperator() == Filter.Operator.EQ) {
+                // Búsqueda exacta en el índice
                 rowIds = index.search((Comparable) bestFilter.getValue());
+            } else if (isRangeOperator(bestFilter.getOperator())) {
+                // Búsqueda por rango usando el índice
+                rowIds = searchRangeInIndex(index, bestFilter);
             } else {
+                // Otros operadores: fallback a scan completo filtrado
                 rowIds = data.values().stream()
                     .filter(r -> filterToApply.apply(r))
                     .map(Row::getRowId)
                     .collect(Collectors.toList());
             }
 
+            // Aplicar todos los filtros restantes a los resultados del índice
             List<Row> result = new ArrayList<>();
             for (long id : rowIds) {
                 Row r = data.get(id);
@@ -145,9 +153,71 @@ public class Table {
             }
             return result;
         } else {
+            // Sin índice: escaneo completo
             return data.values().stream()
                 .filter(r -> matchesAllFilters(r, filters))
                 .collect(Collectors.toList());
+        }
+    }
+    
+    /**
+     * Verifica si el operador es de rango para optimización con índices.
+     */
+    private boolean isRangeOperator(Filter.Operator op) {
+        return op == Filter.Operator.GT || op == Filter.Operator.LT || 
+               op == Filter.Operator.GTE || op == Filter.Operator.LTE ||
+               op == Filter.Operator.BETWEEN;
+    }
+    
+    /**
+     * Busca un rango de valores en el índice B-Tree.
+     * Optimizado para lecturas por rango rápidas.
+     */
+    private List<Long> searchRangeInIndex(BTree index, Filter filter) {
+        List<Long> result = new ArrayList<>();
+        
+        switch (filter.getOperator()) {
+            case GT:
+                // Obtener todos los valores mayores que el valor dado
+                index.traverseInRange((Comparable) filter.getValue(), null, false, true, entry -> {
+                    addValuesFromEntry(result, entry);
+                });
+                break;
+            case LT:
+                // Obtener todos los valores menores que el valor dado
+                index.traverseInRange(null, (Comparable) filter.getValue(), true, false, entry -> {
+                    addValuesFromEntry(result, entry);
+                });
+                break;
+            case GTE:
+                // Obtener todos los valores mayores o iguales
+                index.traverseInRange((Comparable) filter.getValue(), null, true, true, entry -> {
+                    addValuesFromEntry(result, entry);
+                });
+                break;
+            case LTE:
+                // Obtener todos los valores menores o iguales
+                index.traverseInRange(null, (Comparable) filter.getValue(), true, true, entry -> {
+                    addValuesFromEntry(result, entry);
+                });
+                break;
+            case BETWEEN:
+                // Obtener valores en el rango [min, max]
+                Comparable<?> min = (Comparable<?>) ((Object[]) filter.getValue())[0];
+                Comparable<?> max = (Comparable<?>) ((Object[]) filter.getValue())[1];
+                index.traverseInRange(min, max, true, true, entry -> {
+                    addValuesFromEntry(result, entry);
+                });
+                break;
+        }
+        
+        return result;
+    }
+    
+    @SuppressWarnings("unchecked")
+    private void addValuesFromEntry(List<Long> result, Map.Entry<?, List<Long>> entry) {
+        if (entry != null && entry.getValue() != null) {
+            result.addAll(entry.getValue());
         }
     }
 
