@@ -51,7 +51,7 @@ public class DeskDB implements AutoCloseable {
         this.tables = new ConcurrentHashMap<>();
         this.schemas = new HashMap<>();
         this.indexes = new ConcurrentHashMap<>();
-        this.objectStore = new ObjectStore(this); // Initialize shared ObjectStore with integrated storage
+        this.objectStore = null; // Will be initialized after loading data
         
         // Determinar ruta del WAL (mismo directorio que el archivo .deskdb)
         Path walPath = dbPath.resolveSibling(dbPath.getFileName().toString() + ".wal");
@@ -72,6 +72,10 @@ public class DeskDB implements AutoCloseable {
             }
             saveToFile();
         }
+        
+        // Initialize ObjectStore AFTER loading data to ensure proper order
+        this.objectStore = new ObjectStore(this, false);
+        this.objectStore.initialize();  // Explicit initialization after data load
         
         // Inicializar WAL
         this.wal = Wal.open(walPath);

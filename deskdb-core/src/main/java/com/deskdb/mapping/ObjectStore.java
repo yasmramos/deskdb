@@ -90,6 +90,16 @@ public class ObjectStore {
         this.inMemoryOnly = inMemoryOnly;
         this.inMemoryCache = new ConcurrentHashMap<>();
         if (!inMemoryOnly) {
+            // Don't initialize here - it will be called by DeskDB constructor after loading
+            // This prevents double initialization and ensures proper order
+        }
+    }
+    
+    /**
+     * Internal initialization method called by DeskDB after loading data.
+     */
+    void initialize() {
+        if (!inMemoryOnly) {
             initializeInternalTable();
             loadAllToCache();  // Pre-load cache on startup
         }
