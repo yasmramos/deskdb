@@ -65,7 +65,7 @@ public class Filter {
 
     @SuppressWarnings("unchecked")
     public boolean matches(Map<String, Object> row) {
-        // Si es un filtro compuesto (AND/OR)
+        // Si es un filtro compuesto (AND/OR), evaluar hijos recursivamente
         if (logicalOp != LogicalOperator.NONE && !children.isEmpty()) {
             switch (logicalOp) {
                 case AND:
@@ -83,8 +83,8 @@ public class Filter {
             }
         }
         
-        // Filtro simple
-        if (column == null && operator == Operator.ALL) return true;
+        // Filtro simple - validar que tenga columna válida
+        if (column == null || operator == Operator.ALL) return true;
         if (!row.containsKey(column)) return false;
         Object rowValue = row.get(column);
         switch (operator) {
