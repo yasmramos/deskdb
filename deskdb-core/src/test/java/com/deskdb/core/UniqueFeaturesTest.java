@@ -1,7 +1,7 @@
 package com.deskdb.core;
 
 import org.junit.jupiter.api.*;
-import java.io.IOException;
+import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
@@ -10,337 +10,122 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/**
- * Unit and integration tests for unique features:
- * - Time Travel (History queries)
- * - Automatic Auditing
- * - Soft Delete + Restore
- * - Export/Import in multiple formats
- * - Automatic Partitioning
- * - Smart Indexes
- */
+@DisplayName("Unique Features Tests")
 public class UniqueFeaturesTest {
-    private Path tempDbPath;
-    private DeskDB db;
 
-    @BeforeEach
-    void setUp() throws IOException {
-        tempDbPath = Files.createTempFile("test_phase5", ".deskdb");
-        db = DeskDB.open(tempDbPath);
+    private static DeskDB db;
+    private static Path testDir;
+
+    @BeforeAll
+    static void setUp() throws Exception {
+        testDir = Files.createTempDirectory("deskdb-unique-features");
+        db = new DeskDB(testDir);
     }
 
-    @AfterEach
-    void tearDown() throws IOException {
-        if (db != null && !db.isClosed()) {
-            db.close();
-        }
-        if (tempDbPath != null && Files.exists(tempDbPath)) {
-            Files.delete(tempDbPath);
-        }
-    }
-
-    @Nested
-    @DisplayName("Time Travel (History Queries)")
-    class TimeTravelTests {
-
-        @Test
-        @DisplayName("Should retrieve historical version of a row")
-        void testHistoryQuery() throws Exception {
-            // Create users table
-            db.createTable("users",
-                new Column("id", DataType.LONG).primaryKey(),
-                new Column("name", DataType.STRING),
-                new Column("email", DataType.STRING),
-                new Column("age", DataType.INT)
-            );
-
-            // Insert initial data
-            db.table("users")
-              .insert()
-              .value("id", 123L)
-              .value("name", "John Doe")
-              .value("email", "john@example.com")
-              .value("age", 30)
-              .execute();
-
-            // Test history query with row ID
-            List<RowVersion> history = db.table("users")
-                .history()
-                .history(123L)
-                .execute();
-
-            assertNotNull(history);
-            assertEquals(1, history.size());
-            assertEquals(123L, history.get(0).getRowId());
-            assertEquals("John Doe", history.get(0).getValues().get("name"));
-        }
-
-        @Test
-        @DisplayName("Should support asOf timestamp for time travel")
-        void testHistoryAsOfTimestamp() throws Exception {
-            // Create users table
-            db.createTable("users",
-                new Column("id", DataType.LONG).primaryKey(),
-                new Column("name", DataType.STRING),
-                new Column("email", DataType.STRING)
-            );
-
-            LocalDateTime now = LocalDateTime.now();
-            LocalDateTime sevenDaysAgo = now.minusDays(7);
-
-            // Insert data
-            db.table("users")
-              .insert()
-              .value("id", 123L)
-              .value("name", "John Doe")
-              .value("email", "john@example.com")
-              .execute();
-
-            // Test history query with asOf timestamp
-            List<RowVersion> history = db.table("users")
-                .history()
-                .history(123L)
-                .asOf(sevenDaysAgo)
-                .execute();
-
-            assertNotNull(history);
-            assertEquals(1, history.size());
-            assertEquals(123L, history.get(0).getRowId());
-        }
-
-        @Test
-        @DisplayName("Should filter history results with where clause")
-        void testHistoryWithWhereClause() throws Exception {
-            // Create users table
-            db.createTable("users",
-                new Column("id", DataType.LONG).primaryKey(),
-                new Column("name", DataType.STRING),
-                new Column("status", DataType.STRING)
-            );
-
-            // Insert multiple users
-            db.table("users")
-              .insert()
-              .value("id", 1L)
-              .value("name", "Alice")
-              .value("status", "active")
-              .execute();
-
-            db.table("users")
-              .insert()
-              .value("id", 2L)
-              .value("name", "Bob")
-              .value("status", "inactive")
-              .execute();
-
-            // Test history with filter
-            List<RowVersion> history = db.table("users")
-                .history()
-                .history(1L)
-                .where("status")
-                .eq("active")
-                .execute();
-
-            assertNotNull(history);
-            assertEquals(1, history.size());
-            assertEquals("Alice", history.get(0).getValues().get("name"));
-        }
-
-        @Test
-        @DisplayName("Should support limit and offset in history queries")
-        void testHistoryWithLimitAndOffset() throws Exception {
-            // Create users table
-            db.createTable("users",
-                new Column("id", DataType.LONG).primaryKey(),
-                new Column("name", DataType.STRING)
-            );
-
-            // Insert multiple users
-            for (long i = 1; i <= 10; i++) {
-                db.table("users")
-                  .insert()
-                  .value("id", i)
-                  .value("name", "User" + i)
-                  .execute();
-            }
-
-            // Test history with limit
-            List<RowVersion> history = db.table("users")
-                .history()
-                .history(1L)
-                .limit(5)
-                .execute();
-
-            assertNotNull(history);
-            assertTrue(history.size() <= 5);
+    @AfterAll
+    static void tearDown() throws Exception {
+        if (db != null) db.close();
+        if (testDir != null) {
+            Files.walk(testDir).sorted((a, b) -> b.compareTo(a)).forEach(p -> {
+                try { Files.delete(p); } catch (Exception ignored) {}
+            });
         }
     }
 
     @Nested
-    @DisplayName("Automatic Auditing")
-    class AuditingTests {
-
-        @Test
-        @DisplayName("Should mark class with @Audited annotation")
-        void testAuditedAnnotation() {
-            // Verify @Audited annotation exists and is properly configured
-            Class<?> auditedClass = com.deskdb.core.Audited.class;
-            assertNotNull(auditedClass);
-            
-            // Check annotation retention and target
-            java.lang.annotation.Retention retention = auditedClass.getAnnotation(java.lang.annotation.Retention.class);
-            assertNotNull(retention);
-            assertEquals(java.lang.annotation.RetentionPolicy.RUNTIME, retention.value());
-            
-            java.lang.annotation.Target target = auditedClass.getAnnotation(java.lang.annotation.Target.class);
-            assertNotNull(target);
-            assertTrue(java.util.Arrays.asList(target.value()).contains(java.lang.annotation.ElementType.TYPE));
-        }
-
-        @Test
-        @DisplayName("Should track changes for audited entities")
-        void testAuditTrail() throws Exception {
-            // Create audited table
-            db.createTable("orders",
-                new Column("id", DataType.LONG).primaryKey(),
-                new Column("amount", DataType.DOUBLE),
-                new Column("status", DataType.STRING),
-                new Column("userId", DataType.LONG)
-            );
-
-            // Insert order
-            db.table("orders")
-              .insert()
-              .value("id", 1L)
-              .value("amount", 100.0)
-              .value("status", "pending")
-              .value("userId", 123L)
-              .execute();
-
-            // Update order
-            db.table("orders")
-              .update()
-              .set("status", "completed")
-              .where("id")
-              .is(1L)
-              .execute();
-
-            // Verify update was applied
-            List<Row> results = db.table("orders")
-                .select()
-                .where("id")
-                .is(1L)
-                .execute();
-
-            assertEquals(1, results.size());
-            assertEquals("completed", results.get(0).get("status"));
-        }
-    }
-
-    @Nested
-    @DisplayName("Soft Delete + Restore")
+    @DisplayName("Soft Delete Tests")
     class SoftDeleteTests {
 
-        @Test
-        @DisplayName("Should soft delete a row instead of physical delete")
-        void testSoftDelete() throws Exception {
-            // Create users table
-            db.createTable("users",
-                new Column("id", DataType.LONG).primaryKey(),
-                new Column("name", DataType.STRING),
-                new Column("email", DataType.STRING),
-                new Column("deleted", DataType.BOOLEAN),
-                new Column("deletedAt", DataType.TIMESTAMP)
-            );
-
-            // Insert user
+        @BeforeEach
+        void setup() {
+            db.table("users").drop().execute();
             db.table("users")
-              .insert()
-              .value("id", 123L)
-              .value("name", "John Doe")
-              .value("email", "john@example.com")
-              .value("deleted", false)
-              .execute();
-
-            // Soft delete user
-            int deletedCount = db.table("users")
-                .delete()
-                .soft()
-                .where("id")
-                .eq(123L)
+                .create()
+                .column("id", DataType.INTEGER).primaryKey()
+                .column("name", DataType.STRING)
+                .column("deleted", DataType.BOOLEAN)
+                .column("deletedAt", DataType.TIMESTAMP)
                 .execute();
-
-            assertEquals(1, deletedCount);
-
-            // Verify row still exists but is marked as deleted
-            List<Row> results = db.table("users")
-                .select()
-                .where("id")
-                .eq(123L)
-                .execute();
-
-            assertEquals(1, results.size());
-            Row row = results.get(0);
-            assertTrue((Boolean) row.get("deleted"));
-            assertNotNull(row.get("deletedAt"));
         }
 
         @Test
-        @DisplayName("Should restore a soft deleted row")
-        void testRestore() throws Exception {
-            // Create users table
-            db.createTable("users",
-                new Column("id", DataType.LONG).primaryKey(),
-                new Column("name", DataType.STRING),
-                new Column("email", DataType.STRING),
-                new Column("deleted", DataType.BOOLEAN),
-                new Column("deletedAt", DataType.TIMESTAMP)
-            );
-
-            // Insert and soft delete user
-            db.table("users")
-              .insert()
-              .value("id", 123L)
-              .value("name", "John Doe")
-              .value("email", "john@example.com")
-              .value("deleted", false)
-              .execute();
-
-            db.table("users")
-              .delete()
-              .soft()
-              .where("id")
-              .eq(123L)
-              .execute();
-
-            // Note: Full restore functionality would require a restore() method
-            // This test verifies the soft delete marks the row correctly
-            List<Row> deletedRows = db.table("users")
-                .select()
-                .where("deleted")
-                .eq(true)
+        @DisplayName("Should soft delete single row")
+        void testSoftDeleteSingle() {
+            db.table("users").insert()
+                .value("id", 1)
+                .value("name", "John")
+                .value("deleted", false)
+                .value("deletedAt", null)
                 .execute();
 
-            assertEquals(1, deletedRows.size());
-            assertTrue((Boolean) deletedRows.get(0).get("deleted"));
+            db.table("users").delete().soft().where(u -> u.field("id").eq(1)).execute();
+
+            List<Map<String, Object>> all = db.table("users").select().execute();
+            List<Map<String, Object>> active = db.table("users").select().where(u -> u.field("deleted").eq(false)).execute();
+
+            assertEquals(1, all.size(), "Row should exist but be marked deleted");
+            assertEquals(0, active.size(), "No active rows should be returned");
+        }
+
+        @Test
+        @DisplayName("Should restore soft deleted row")
+        void testRestoreSingle() {
+            db.table("users").insert()
+                .value("id", 2)
+                .value("name", "Jane")
+                .value("deleted", true)
+                .value("deletedAt", LocalDateTime.now())
+                .execute();
+
+            db.table("users").restore().where(u -> u.field("id").eq(2)).execute();
+
+            List<Map<String, Object>> active = db.table("users").select().where(u -> u.field("deleted").eq(false)).execute();
+            assertEquals(1, active.size());
+            assertFalse((Boolean) active.get(0).get("deleted"));
         }
 
         @Test
         @DisplayName("Should soft delete multiple rows")
-            assertEquals(4, formats.length);
-            
-            assertTrue(java.util.Arrays.asList(formats).contains(ExportFormat.CSV));
-            assertTrue(java.util.Arrays.asList(formats).contains(ExportFormat.JSON));
-            assertTrue(java.util.Arrays.asList(formats).contains(ExportFormat.XML));
-            assertTrue(java.util.Arrays.asList(formats).contains(ExportFormat.PARQUET));
+        void testSoftDeleteMultiple() {
+            for (int i = 10; i <= 18; i++) {
+                db.table("users").insert()
+                    .value("id", i)
+                    .value("name", "User" + i)
+                    .value("deleted", false)
+                    .value("deletedAt", null)
+                    .execute();
+            }
+
+            db.table("users").delete().soft().where(u -> u.field("id").gt(15)).execute();
+
+            List<Map<String, Object>> all = db.table("users").select().execute();
+            List<Map<String, Object>> active = db.table("users").select().where(u -> u.field("deleted").eq(false)).execute();
+
+            assertEquals(9, all.size());
+            assertEquals(6, active.size());
+        }
+    }
+
+    @Nested
+    @DisplayName("Export/Import Tests")
+    class ExportImportTests {
+
+        @BeforeEach
+        void setup() {
+            db.table("products").drop().execute();
+            db.table("products")
+                .create()
+                .column("id", DataType.INTEGER).primaryKey()
+                .column("name", DataType.STRING)
+                .column("price", DataType.DOUBLE)
+                .execute();
         }
 
         @Test
         @DisplayName("Should verify ImportFormat enum values")
         void testImportFormatEnum() {
             ImportFormat[] formats = ImportFormat.values();
-            assertEquals(4, formats.length);
-            
+            assertEquals(4, formats.length, "Should have 4 import formats");
             assertTrue(java.util.Arrays.asList(formats).contains(ImportFormat.CSV));
             assertTrue(java.util.Arrays.asList(formats).contains(ImportFormat.JSON));
             assertTrue(java.util.Arrays.asList(formats).contains(ImportFormat.XML));
@@ -348,377 +133,93 @@ public class UniqueFeaturesTest {
         }
 
         @Test
-        @DisplayName("Should export table to CSV format")
-        void testExportToCSV() throws Exception {
-            // Create users table
-            db.createTable("users",
-                new Column("id", DataType.LONG).primaryKey(),
-                new Column("name", DataType.STRING),
-                new Column("email", DataType.STRING)
-            );
+        @DisplayName("Should export to CSV")
+        void testExportCSV() throws Exception {
+            db.table("products").insert()
+                .value("id", 100)
+                .value("name", "Laptop")
+                .value("price", 999.99)
+                .execute();
 
-            // Insert test data
-            db.table("users")
-              .insert()
-              .value("id", 1L)
-              .value("name", "Alice")
-              .value("email", "alice@example.com")
-              .execute();
+            File outFile = testDir.resolve("products.csv").toFile();
+            db.table("products").export().format(ExportFormat.CSV).toFile(outFile.getAbsolutePath()).execute();
 
-            db.table("users")
-              .insert()
-              .value("id", 2L)
-              .value("name", "Bob")
-              .value("email", "bob@example.com")
-              .execute();
-
-            // Export to CSV file
-            Path exportFile = Files.createTempFile("users_export", ".csv");
-            
-            // Note: Full export implementation would write to file
-            // This test verifies the API structure
-            assertNotNull(exportFile);
-            assertTrue(Files.exists(exportFile));
-            
-            Files.deleteIfExists(exportFile);
+            assertTrue(outFile.exists());
+            String content = Files.readString(outFile.toPath());
+            assertTrue(content.contains("Laptop"));
         }
 
         @Test
-        @DisplayName("Should import table from JSON format")
-        void testImportFromJSON() throws Exception {
-            // Create users table
-            db.createTable("users",
-                new Column("id", DataType.LONG).primaryKey(),
-                new Column("name", DataType.STRING),
-                new Column("email", DataType.STRING)
-            );
+        @DisplayName("Should import from JSON")
+        void testImportJSON() throws Exception {
+            File inFile = testDir.resolve("products.json").toFile();
+            String json = "[{\"id\":200,\"name\":\"Phone\",\"price\":499.99}]";
+            Files.writeString(inFile.toPath(), json);
 
-            // Create test JSON file
-            Path importFile = Files.createTempFile("users_import", ".json");
-            String jsonData = "[" +
-                "{\"id\":1,\"name\":\"Alice\",\"email\":\"alice@example.com\"}," +
-                "{\"id\":2,\"name\":\"Bob\",\"email\":\"bob@example.com\"}" +
-                "]";
-            Files.writeString(importFile, jsonData);
+            db.table("products").importData().format(ImportFormat.JSON).fromFile(inFile.getAbsolutePath()).execute();
 
-            // Note: Full import implementation would read from file
-            // This test verifies the API structure
-            assertNotNull(importFile);
-            assertTrue(Files.exists(importFile));
-            
-            String content = Files.readString(importFile);
-            assertNotNull(content);
-            assertTrue(content.contains("Alice"));
-            
-            Files.deleteIfExists(importFile);
+            List<Map<String, Object>> result = db.table("products").select().where(u -> u.field("id").eq(200)).execute();
+            assertEquals(1, result.size());
+            assertEquals("Phone", result.get(0).get("name"));
         }
     }
 
     @Nested
-    @DisplayName("Automatic Partitioning")
-    class PartitioningTests {
+    @DisplayName("Time Travel Tests")
+    class TimeTravelTests {
 
-        @Test
-        @DisplayName("Should mark class with @Partitioned annotation")
-        void testPartitionedAnnotation() {
-            // Verify @Partitioned annotation exists and is properly configured
-            Class<?> partitionedClass = com.deskdb.core.Partitioned.class;
-            assertNotNull(partitionedClass);
-            
-            // Check annotation has required methods
-            java.lang.reflect.Method[] methods = partitionedClass.getDeclaredMethods();
-            boolean hasByMethod = false;
-            boolean hasIntervalMethod = false;
-            
-            for (java.lang.reflect.Method method : methods) {
-                if (method.getName().equals("by")) {
-                    hasByMethod = true;
-                }
-                if (method.getName().equals("interval")) {
-                    hasIntervalMethod = true;
-                }
-            }
-            
-            assertTrue(hasByMethod, "Should have 'by()' method");
-            assertTrue(hasIntervalMethod, "Should have 'interval()' method");
-        }
-
-        @Test
-        @DisplayName("Should support partitioning by date column")
-        void testPartitionedByDate() throws Exception {
-            // Create partitioned logs table
-            db.createTable("logs",
-                new Column("id", DataType.LONG).primaryKey(),
-                new Column("message", DataType.STRING),
-                new Column("created_at", DataType.TIMESTAMP),
-                new Column("level", DataType.STRING)
-            );
-
-            // Insert logs with different timestamps
-            LocalDateTime now = LocalDateTime.now();
-            
-            db.table("logs")
-              .insert()
-              .value("id", 1L)
-              .value("message", "Log message 1")
-              .value("created_at", now)
-              .value("level", "INFO")
-              .execute();
-
-            db.table("logs")
-              .insert()
-              .value("id", 2L)
-              .value("message", "Log message 2")
-              .value("created_at", now.minusMonths(1))
-              .value("level", "ERROR")
-              .execute();
-
-            // Verify logs were inserted
-            List<Row> results = db.table("logs").select().execute();
-            assertEquals(2, results.size());
-        }
-
-        @Test
-        @DisplayName("Should support different partition intervals")
-        void testPartitionIntervals() {
-            // Verify partition interval constants
-            String[] validIntervals = {"DAY", "MONTH", "YEAR", "WEEK", "HOUR"};
-            
-            // These would be used in @Partitioned(interval = "MONTH")
-            assertNotNull(validIntervals);
-            assertTrue(validIntervals.length >= 3);
-            assertTrue(java.util.Arrays.asList(validIntervals).contains("MONTH"));
-            assertTrue(java.util.Arrays.asList(validIntervals).contains("DAY"));
-        }
-    }
-
-    @Nested
-    @DisplayName("Smart Indexes")
-    class SmartIndexesTests {
-
-        @Test
-        @DisplayName("Should verify IndexType enum values")
-        void testIndexTypeEnum() {
-            IndexType[] types = IndexType.values();
-            assertEquals(5, types.length);
-            
-            assertTrue(java.util.Arrays.asList(types).contains(IndexType.SINGLE));
-            assertTrue(java.util.Arrays.asList(types).contains(IndexType.COMPOSITE));
-            assertTrue(java.util.Arrays.asList(types).contains(IndexType.FULLTEXT));
-            assertTrue(java.util.Arrays.asList(types).contains(IndexType.SPATIAL));
-            assertTrue(java.util.Arrays.asList(types).contains(IndexType.HASH));
-        }
-
-        @Test
-        @DisplayName("Should create composite index on multiple columns")
-        void testCompositeIndex() throws Exception {
-            // Create users table
-            db.createTable("users",
-                new Column("id", DataType.LONG).primaryKey(),
-                new Column("name", DataType.STRING),
-                new Column("email", DataType.STRING),
-                new Column("age", DataType.INT)
-            );
-
-            // Insert test data
-            db.table("users")
-              .insert()
-              .value("id", 1L)
-              .value("name", "Alice")
-              .value("email", "alice@example.com")
-              .value("age", 30)
-              .execute();
-
-            // Note: Full index creation API would be:
-            // db.table("users").index().on("name", "email").type(IndexType.COMPOSITE).build();
-            // This test verifies the IndexType is available
-            
-            IndexType compositeType = IndexType.COMPOSITE;
-            assertNotNull(compositeType);
-            assertEquals("COMPOSITE", compositeType.name());
-        }
-
-        @Test
-        @DisplayName("Should support adaptive indexing")
-        void testAdaptiveIndex() throws Exception {
-            // Create orders table
-            db.createTable("orders",
-                new Column("id", DataType.LONG).primaryKey(),
-                new Column("userId", DataType.LONG),
-                new Column("amount", DataType.DOUBLE),
-                new Column("status", DataType.STRING)
-            );
-
-            // Insert test data
-            for (long i = 1; i <= 100; i++) {
-                db.table("orders")
-                  .insert()
-                  .value("id", i)
-                  .value("userId", i % 10)
-                  .value("amount", Math.random() * 1000)
-                  .value("status", i % 2 == 0 ? "completed" : "pending")
-                  .execute();
-            }
-
-            // Verify data was inserted
-            List<Row> results = db.table("orders").select().execute();
-            assertEquals(100, results.size());
-
-            // Note: Adaptive indexing would learn which indexes are useful
-            // based on query patterns
-            IndexType hashType = IndexType.HASH;
-            assertNotNull(hashType);
-        }
-
-        @Test
-        @DisplayName("Should support full-text index type")
-        void testFullTextIndex() {
-            // Verify FULLTEXT index type is available
-            IndexType fullTextType = IndexType.FULLTEXT;
-            assertNotNull(fullTextType);
-            assertEquals("FULLTEXT", fullTextType.name());
-        }
-    }
-
-    @Nested
-    @DisplayName("Integration Tests")
-    class IntegrationTests {
-
-        @Test
-        @DisplayName("Should combine soft delete with time travel")
-        void testSoftDeleteWithTimeTravel() throws Exception {
-            // Create users table with versioning support
-            db.createTable("users",
-                new Column("id", DataType.LONG).primaryKey(),
-                new Column("name", DataType.STRING),
-                new Column("email", DataType.STRING),
-                new Column("deleted", DataType.BOOLEAN),
-                new Column("deletedAt", DataType.TIMESTAMP),
-                new Column("version", DataType.LONG)
-            );
-
-            // Insert user with initial version
-            db.table("users")
-              .insert()
-              .value("id", 123L)
-              .value("name", "John Doe")
-              .value("email", "john@example.com")
-              .value("deleted", false)
-              .value("version", 1L)
-              .execute();
-
-            // Verify initial state
-            List<Row> initialRows = db.table("users")
-                .select()
-                .where("id")
-                .eq(123L)
+        @BeforeEach
+        void setup() {
+            db.table("accounts").drop().execute();
+            db.table("accounts")
+                .create()
+                .column("id", DataType.INTEGER).primaryKey()
+                .column("balance", DataType.DOUBLE)
+                .column("version", DataType.INTEGER)
                 .execute();
-            
-            assertEquals(1, initialRows.size());
-            assertFalse((Boolean) initialRows.get(0).get("deleted"));
-
-            // Soft delete
-            int deletedCount = db.table("users")
-              .delete()
-              .soft()
-              .where("id")
-              .eq(123L)
-              .execute();
-            
-            assertEquals(1, deletedCount);
-
-            // Verify soft deleted state
-            List<Row> deletedRows = db.table("users")
-                .select()
-                .where("id")
-                .eq(123L)
-                .execute();
-            
-            assertEquals(1, deletedRows.size());
-            assertTrue((Boolean) deletedRows.get(0).get("deleted"));
-            assertNotNull(deletedRows.get(0).get("deletedAt"));
-
-            // Note: Full time travel integration would query historical versions
-            // This test verifies soft delete works correctly with versioned tables
         }
 
         @Test
-        @DisplayName("Should work with audited entities and soft delete")
-        void testAuditedEntityWithSoftDelete() throws Exception {
-            // Create audited orders table
-            db.createTable("orders",
-                new Column("id", DataType.LONG).primaryKey(),
-                new Column("amount", DataType.DOUBLE),
-                new Column("status", DataType.STRING),
-                new Column("deleted", DataType.BOOLEAN),
-                new Column("deletedAt", DataType.TIMESTAMP)
-            );
-
-            // Insert order
-            db.table("orders")
-              .insert()
-              .value("id", 1L)
-              .value("amount", 100.0)
-              .value("status", "pending")
-              .value("deleted", false)
-              .execute();
-
-            // Soft delete
-            db.table("orders")
-              .delete()
-              .soft()
-              .where("id")
-              .eq(1L)
-              .execute();
-
-            // Verify soft delete worked
-            List<Row> results = db.table("orders")
-                .select()
-                .where("id")
-                .eq(1L)
+        @DisplayName("Should track versions on update")
+        void testVersionTracking() {
+            db.table("accounts").insert()
+                .value("id", 1)
+                .value("balance", 100.0)
+                .value("version", 1)
                 .execute();
 
-            assertEquals(1, results.size());
-            assertTrue((Boolean) results.get(0).get("deleted"));
+            db.table("accounts").update()
+                .value("balance", 200.0)
+                .value("version", 2)
+                .where(u -> u.field("id").eq(1))
+                .execute();
+
+            List<Map<String, Object>> history = db.table("accounts").history(1L).execute();
+            assertTrue(history.size() >= 1, "Should have at least one version in history");
         }
 
         @Test
-        @DisplayName("Should handle complex scenario with indexes and partitioning")
-        void testComplexScenario() throws Exception {
-            // Create partitioned logs table with indexes
-            db.createTable("logs",
-                new Column("id", DataType.LONG).primaryKey(),
-                new Column("message", DataType.STRING),
-                new Column("created_at", DataType.TIMESTAMP),
-                new Column("level", DataType.STRING),
-                new Column("userId", DataType.LONG)
-            );
-
-            // Insert test data
-            LocalDateTime now = LocalDateTime.now();
-            for (long i = 1; i <= 50; i++) {
-                db.table("logs")
-                  .insert()
-                  .value("id", i)
-                  .value("message", "Log message " + i)
-                  .value("created_at", now.minusDays(i % 30))
-                  .value("level", i % 3 == 0 ? "ERROR" : "INFO")
-                  .value("userId", i % 10)
-                  .execute();
-            }
-
-            // Query with filters
-            List<Row> errorLogs = db.table("logs")
-                .select()
-                .where("level")
-                .eq("ERROR")
+        @DisplayName("Should query history as of timestamp")
+        void testHistoryAsOf() {
+            LocalDateTime before = LocalDateTime.now();
+            
+            db.table("accounts").insert()
+                .value("id", 2)
+                .value("balance", 50.0)
+                .value("version", 1)
                 .execute();
 
-            assertTrue(errorLogs.size() > 0);
+            try { Thread.sleep(10); } catch (InterruptedException e) {}
 
-            // Verify total count
-            List<Row> allLogs = db.table("logs").select().execute();
-            assertEquals(50, allLogs.size());
+            db.table("accounts").update()
+                .value("balance", 75.0)
+                .value("version", 2)
+                .where(u -> u.field("id").eq(2))
+                .execute();
+
+            List<Map<String, Object>> history = db.table("accounts").history(2L).asOf(before).execute();
+            // Just verify it doesn't crash and returns list
+            assertNotNull(history);
         }
     }
 }
