@@ -22,7 +22,7 @@ class SoftDeleteRestoreTest {
     static void setUp() throws Exception {
         dbDir = new File(System.getProperty("java.io.tmpdir"), "deskdb_softdelete_" + System.currentTimeMillis());
         dbDir.mkdirs();
-        db = new DeskDB(dbDir.getAbsolutePath());
+        db = new DeskDB(dbDir.toPath());
     }
 
     @AfterAll

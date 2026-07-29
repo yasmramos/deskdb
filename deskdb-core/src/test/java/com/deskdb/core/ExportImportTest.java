@@ -21,7 +21,7 @@ class ExportImportTest {
     static void setUp() throws Exception {
         dbDir = new File(System.getProperty("java.io.tmpdir"), "deskdb_exportimport_" + System.currentTimeMillis());
         dbDir.mkdirs();
-        db = new DeskDB(dbDir.getAbsolutePath());
+        db = new DeskDB(dbDir.toPath());
         
         // Create users table using the correct API
         db.createTable("users",
@@ -80,7 +80,7 @@ class ExportImportTest {
         try {
             db.table("users")
                 .delete()
-                .where("id").gt(0)
+                .where(u -> u.field("id").gt(0))
                 .execute();
         } catch (Exception e) {
             // Ignore cleanup errors
@@ -133,7 +133,7 @@ class ExportImportTest {
         // Delete all data first
         db.table("users")
             .delete()
-            .where("id").gt(0)
+            .where(u -> u.field("id").gt(0))
             .execute();
         
         File emptyFile = new File(dbDir, "empty_export.csv");

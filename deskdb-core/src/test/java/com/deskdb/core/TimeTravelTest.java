@@ -23,7 +23,7 @@ class TimeTravelTest {
     static void setUp() throws Exception {
         dbDir = new File(System.getProperty("java.io.tmpdir"), "deskdb_timetravel_" + System.currentTimeMillis());
         dbDir.mkdirs();
-        db = new DeskDB(dbDir.getAbsolutePath());
+        db = new DeskDB(dbDir.toPath());
     }
 
     @AfterAll
@@ -40,12 +40,10 @@ class TimeTravelTest {
     void setupTest() throws Exception {
         // Create users table for testing using fluent API
         try {
-            db.table("users")
-                .create()
-                .column("id", DataType.INT).primaryKey()
-                .column("name", DataType.STRING, 100)
-                .column("age", DataType.INT)
-                .execute();
+            db.createTable("users",
+                new Column("id", DataType.INT).primaryKey(),
+                new Column("name", DataType.STRING),
+                new Column("age", DataType.INT));
         } catch (Exception e) {
             // Table might already exist, ignore
         }
@@ -73,7 +71,7 @@ class TimeTravelTest {
         try {
             db.table("users")
                 .delete()
-                .where("id").gt(0)
+                .where(u -> u.field("id").gt(0))
                 .execute();
         } catch (Exception e) {
             // Ignore cleanup errors
