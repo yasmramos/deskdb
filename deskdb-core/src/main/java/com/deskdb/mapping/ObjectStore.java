@@ -561,7 +561,10 @@ public class ObjectStore {
             
             for (var row : existingResults) {
                 Object entityId = row.get("id");
-                if (convertId(entityId).equals(convertId(id))) {
+                Long convertedEntityId = convertId(entityId);
+                Long convertedId = convertId(id);
+                if (convertedEntityId != null && convertedId != null && 
+                    convertedEntityId.equals(convertedId)) {
                     db.table(INTERNAL_TABLE_NAME)
                         .delete()
                         .where("id").eq(row.getRowId())
@@ -571,9 +574,13 @@ public class ObjectStore {
             }
             
             // Insert new
+            Long storedId = convertId(id);
+            if (storedId == null) {
+                throw new RuntimeException("Cannot store entity with null ID");
+            }
             db.table(INTERNAL_TABLE_NAME)
                 .insert()
-                .value("id", convertId(id))
+                .value("id", storedId)
                 .value("class_name", typeName)
                 .value("data", data)
                 .execute();
@@ -698,6 +705,7 @@ public class ObjectStore {
      * Converts ID to Long format for database storage.
      */
     private Long convertId(Object id) {
+        if (id == null) return null;
         if (id instanceof Long) return (Long) id;
         if (id instanceof Integer) return ((Integer) id).longValue();
         if (id instanceof String) {

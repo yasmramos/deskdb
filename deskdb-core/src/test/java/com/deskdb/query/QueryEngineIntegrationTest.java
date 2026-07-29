@@ -58,7 +58,12 @@ public class QueryEngineIntegrationTest {
     
     private void insertProduct(Long id, String name, Double price, 
                                Integer quantity, String category, Boolean active) throws Exception {
-        db.table("products").insert()
+        insertProduct(db, id, name, price, quantity, category, active);
+    }
+    
+    private void insertProduct(DeskDB database, Long id, String name, Double price, 
+                               Integer quantity, String category, Boolean active) throws Exception {
+        database.table("products").insert()
             .value("id", id)
             .value("name", name)
             .value("price", price)
@@ -83,6 +88,8 @@ public class QueryEngineIntegrationTest {
     class QueryOptimizerTests {
         
         private Path nestedTempDbPath;
+        private DeskDB db;
+        private Table table;
         
         @BeforeEach
         void setUp() throws Exception {
@@ -98,18 +105,18 @@ public class QueryEngineIntegrationTest {
                 new Column("active", DataType.BOOLEAN)
             );
             table = db.getTable("products");
-            insertProduct(1L, "Laptop", 999.99, 50, "Electronics", true);
-            insertProduct(2L, "Mouse", 29.99, 200, "Electronics", true);
-            insertProduct(3L, "Keyboard", 79.99, 150, "Electronics", true);
-            insertProduct(4L, "Monitor", 299.99, 75, "Electronics", false);
-            insertProduct(5L, "Desk", 199.99, 30, "Furniture", true);
-            insertProduct(6L, "Chair", 149.99, 45, "Furniture", true);
-            insertProduct(7L, "Headphones", 89.99, 100, "Electronics", true);
-            insertProduct(8L, "Webcam", 59.99, 80, "Electronics", false);
-            insertProduct(9L, "Bookshelf", 129.99, 20, "Furniture", true);
-            insertProduct(10L, "Lamp", 39.99, 60, "Furniture", true);
-            insertProduct(11L, "Clean Code", 45.99, 100, "Books", true);
-            insertProduct(12L, "Design Patterns", 54.99, 75, "Books", false);
+            insertProduct(db, 1L, "Laptop", 999.99, 50, "Electronics", true);
+            insertProduct(db, 2L, "Mouse", 29.99, 200, "Electronics", true);
+            insertProduct(db, 3L, "Keyboard", 79.99, 150, "Electronics", true);
+            insertProduct(db, 4L, "Monitor", 299.99, 75, "Electronics", false);
+            insertProduct(db, 5L, "Desk", 199.99, 30, "Furniture", true);
+            insertProduct(db, 6L, "Chair", 149.99, 45, "Furniture", true);
+            insertProduct(db, 7L, "Headphones", 89.99, 100, "Electronics", true);
+            insertProduct(db, 8L, "Webcam", 59.99, 80, "Electronics", false);
+            insertProduct(db, 9L, "Bookshelf", 129.99, 20, "Furniture", true);
+            insertProduct(db, 10L, "Lamp", 39.99, 60, "Furniture", true);
+            insertProduct(db, 11L, "Clean Code", 45.99, 100, "Books", true);
+            insertProduct(db, 12L, "Design Patterns", 54.99, 75, "Books", false);
             
             assertNotNull(db, "Database should be initialized");
             assertNotNull(table, "Table should be initialized");
@@ -235,6 +242,8 @@ public class QueryEngineIntegrationTest {
     class QueryPlanTests {
         
         private Path nestedTempDbPath;
+        private DeskDB db;
+        private Table table;
         
         @BeforeEach
         void setUp() throws Exception {
@@ -250,18 +259,18 @@ public class QueryEngineIntegrationTest {
                 new Column("active", DataType.BOOLEAN)
             );
             table = db.getTable("products");
-            insertProduct(1L, "Laptop", 999.99, 50, "Electronics", true);
-            insertProduct(2L, "Mouse", 29.99, 200, "Electronics", true);
-            insertProduct(3L, "Keyboard", 79.99, 150, "Electronics", true);
-            insertProduct(4L, "Monitor", 299.99, 75, "Electronics", false);
-            insertProduct(5L, "Desk", 199.99, 30, "Furniture", true);
-            insertProduct(6L, "Chair", 149.99, 45, "Furniture", true);
-            insertProduct(7L, "Headphones", 89.99, 100, "Electronics", true);
-            insertProduct(8L, "Webcam", 59.99, 80, "Electronics", false);
-            insertProduct(9L, "Bookshelf", 129.99, 20, "Furniture", true);
-            insertProduct(10L, "Lamp", 39.99, 60, "Furniture", true);
-            insertProduct(11L, "Clean Code", 45.99, 100, "Books", true);
-            insertProduct(12L, "Design Patterns", 54.99, 75, "Books", false);
+            insertProduct(db, 1L, "Laptop", 999.99, 50, "Electronics", true);
+            insertProduct(db, 2L, "Mouse", 29.99, 200, "Electronics", true);
+            insertProduct(db, 3L, "Keyboard", 79.99, 150, "Electronics", true);
+            insertProduct(db, 4L, "Monitor", 299.99, 75, "Electronics", false);
+            insertProduct(db, 5L, "Desk", 199.99, 30, "Furniture", true);
+            insertProduct(db, 6L, "Chair", 149.99, 45, "Furniture", true);
+            insertProduct(db, 7L, "Headphones", 89.99, 100, "Electronics", true);
+            insertProduct(db, 8L, "Webcam", 59.99, 80, "Electronics", false);
+            insertProduct(db, 9L, "Bookshelf", 129.99, 20, "Furniture", true);
+            insertProduct(db, 10L, "Lamp", 39.99, 60, "Furniture", true);
+            insertProduct(db, 11L, "Clean Code", 45.99, 100, "Books", true);
+            insertProduct(db, 12L, "Design Patterns", 54.99, 75, "Books", false);
             
             assertNotNull(db, "Database should be initialized");
             assertNotNull(table, "Table should be initialized");
@@ -340,6 +349,8 @@ public class QueryEngineIntegrationTest {
     class SelectBuilderIntegrationTests {
         
         private Path nestedTempDbPath;
+        private DeskDB db;
+        private Table table;
         
         @BeforeEach
         void setUp() throws Exception {
@@ -355,18 +366,18 @@ public class QueryEngineIntegrationTest {
                 new Column("active", DataType.BOOLEAN)
             );
             table = db.getTable("products");
-            insertProduct(1L, "Laptop", 999.99, 50, "Electronics", true);
-            insertProduct(2L, "Mouse", 29.99, 200, "Electronics", true);
-            insertProduct(3L, "Keyboard", 79.99, 150, "Electronics", true);
-            insertProduct(4L, "Monitor", 299.99, 75, "Electronics", false);
-            insertProduct(5L, "Desk", 199.99, 30, "Furniture", true);
-            insertProduct(6L, "Chair", 149.99, 45, "Furniture", true);
-            insertProduct(7L, "Headphones", 89.99, 100, "Electronics", true);
-            insertProduct(8L, "Webcam", 59.99, 80, "Electronics", false);
-            insertProduct(9L, "Bookshelf", 129.99, 20, "Furniture", true);
-            insertProduct(10L, "Lamp", 39.99, 60, "Furniture", true);
-            insertProduct(11L, "Clean Code", 45.99, 100, "Books", true);
-            insertProduct(12L, "Design Patterns", 54.99, 75, "Books", false);
+            insertProduct(db, 1L, "Laptop", 999.99, 50, "Electronics", true);
+            insertProduct(db, 2L, "Mouse", 29.99, 200, "Electronics", true);
+            insertProduct(db, 3L, "Keyboard", 79.99, 150, "Electronics", true);
+            insertProduct(db, 4L, "Monitor", 299.99, 75, "Electronics", false);
+            insertProduct(db, 5L, "Desk", 199.99, 30, "Furniture", true);
+            insertProduct(db, 6L, "Chair", 149.99, 45, "Furniture", true);
+            insertProduct(db, 7L, "Headphones", 89.99, 100, "Electronics", true);
+            insertProduct(db, 8L, "Webcam", 59.99, 80, "Electronics", false);
+            insertProduct(db, 9L, "Bookshelf", 129.99, 20, "Furniture", true);
+            insertProduct(db, 10L, "Lamp", 39.99, 60, "Furniture", true);
+            insertProduct(db, 11L, "Clean Code", 45.99, 100, "Books", true);
+            insertProduct(db, 12L, "Design Patterns", 54.99, 75, "Books", false);
             
             assertNotNull(db, "Database should be initialized");
             assertNotNull(table, "Table should be initialized");
@@ -651,6 +662,8 @@ public class QueryEngineIntegrationTest {
     class ComplexQueryScenarios {
         
         private Path nestedTempDbPath;
+        private DeskDB db;
+        private Table table;
         
         @BeforeEach
         void setUp() throws Exception {
@@ -666,18 +679,18 @@ public class QueryEngineIntegrationTest {
                 new Column("active", DataType.BOOLEAN)
             );
             table = db.getTable("products");
-            insertProduct(1L, "Laptop", 999.99, 50, "Electronics", true);
-            insertProduct(2L, "Mouse", 29.99, 200, "Electronics", true);
-            insertProduct(3L, "Keyboard", 79.99, 150, "Electronics", true);
-            insertProduct(4L, "Monitor", 299.99, 75, "Electronics", false);
-            insertProduct(5L, "Desk", 199.99, 30, "Furniture", true);
-            insertProduct(6L, "Chair", 149.99, 45, "Furniture", true);
-            insertProduct(7L, "Headphones", 89.99, 100, "Electronics", true);
-            insertProduct(8L, "Webcam", 59.99, 80, "Electronics", false);
-            insertProduct(9L, "Bookshelf", 129.99, 20, "Furniture", true);
-            insertProduct(10L, "Lamp", 39.99, 60, "Furniture", true);
-            insertProduct(11L, "Clean Code", 45.99, 100, "Books", true);
-            insertProduct(12L, "Design Patterns", 54.99, 75, "Books", false);
+            insertProduct(db, 1L, "Laptop", 999.99, 50, "Electronics", true);
+            insertProduct(db, 2L, "Mouse", 29.99, 200, "Electronics", true);
+            insertProduct(db, 3L, "Keyboard", 79.99, 150, "Electronics", true);
+            insertProduct(db, 4L, "Monitor", 299.99, 75, "Electronics", false);
+            insertProduct(db, 5L, "Desk", 199.99, 30, "Furniture", true);
+            insertProduct(db, 6L, "Chair", 149.99, 45, "Furniture", true);
+            insertProduct(db, 7L, "Headphones", 89.99, 100, "Electronics", true);
+            insertProduct(db, 8L, "Webcam", 59.99, 80, "Electronics", false);
+            insertProduct(db, 9L, "Bookshelf", 129.99, 20, "Furniture", true);
+            insertProduct(db, 10L, "Lamp", 39.99, 60, "Furniture", true);
+            insertProduct(db, 11L, "Clean Code", 45.99, 100, "Books", true);
+            insertProduct(db, 12L, "Design Patterns", 54.99, 75, "Books", false);
             
             assertNotNull(db, "Database should be initialized");
             assertNotNull(table, "Table should be initialized");
@@ -773,6 +786,8 @@ public class QueryEngineIntegrationTest {
     class WhereConditionTests {
         
         private Path nestedTempDbPath;
+        private DeskDB db;
+        private Table table;
         
         @BeforeEach
         void setUp() throws Exception {
@@ -788,18 +803,18 @@ public class QueryEngineIntegrationTest {
                 new Column("active", DataType.BOOLEAN)
             );
             table = db.getTable("products");
-            insertProduct(1L, "Laptop", 999.99, 50, "Electronics", true);
-            insertProduct(2L, "Mouse", 29.99, 200, "Electronics", true);
-            insertProduct(3L, "Keyboard", 79.99, 150, "Electronics", true);
-            insertProduct(4L, "Monitor", 299.99, 75, "Electronics", false);
-            insertProduct(5L, "Desk", 199.99, 30, "Furniture", true);
-            insertProduct(6L, "Chair", 149.99, 45, "Furniture", true);
-            insertProduct(7L, "Headphones", 89.99, 100, "Electronics", true);
-            insertProduct(8L, "Webcam", 59.99, 80, "Electronics", false);
-            insertProduct(9L, "Bookshelf", 129.99, 20, "Furniture", true);
-            insertProduct(10L, "Lamp", 39.99, 60, "Furniture", true);
-            insertProduct(11L, "Clean Code", 45.99, 100, "Books", true);
-            insertProduct(12L, "Design Patterns", 54.99, 75, "Books", false);
+            insertProduct(db, 1L, "Laptop", 999.99, 50, "Electronics", true);
+            insertProduct(db, 2L, "Mouse", 29.99, 200, "Electronics", true);
+            insertProduct(db, 3L, "Keyboard", 79.99, 150, "Electronics", true);
+            insertProduct(db, 4L, "Monitor", 299.99, 75, "Electronics", false);
+            insertProduct(db, 5L, "Desk", 199.99, 30, "Furniture", true);
+            insertProduct(db, 6L, "Chair", 149.99, 45, "Furniture", true);
+            insertProduct(db, 7L, "Headphones", 89.99, 100, "Electronics", true);
+            insertProduct(db, 8L, "Webcam", 59.99, 80, "Electronics", false);
+            insertProduct(db, 9L, "Bookshelf", 129.99, 20, "Furniture", true);
+            insertProduct(db, 10L, "Lamp", 39.99, 60, "Furniture", true);
+            insertProduct(db, 11L, "Clean Code", 45.99, 100, "Books", true);
+            insertProduct(db, 12L, "Design Patterns", 54.99, 75, "Books", false);
             
             assertNotNull(db, "Database should be initialized");
             assertNotNull(table, "Table should be initialized");
