@@ -390,11 +390,12 @@ public class UniqueFeaturesTest {
         @DisplayName("Should verify ImportFormat enum values")
         void testImportFormatEnum() {
             ImportFormat[] formats = ImportFormat.values();
-            assertEquals(3, formats.length);
+            assertEquals(4, formats.length);
             
             assertTrue(java.util.Arrays.asList(formats).contains(ImportFormat.CSV));
             assertTrue(java.util.Arrays.asList(formats).contains(ImportFormat.JSON));
             assertTrue(java.util.Arrays.asList(formats).contains(ImportFormat.XML));
+            assertTrue(java.util.Arrays.asList(formats).contains(ImportFormat.PARQUET));
         }
 
         @Test
