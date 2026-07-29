@@ -15,6 +15,8 @@ public class RowVersion {
     private final LocalDateTime timestamp;
     private final String operation; // INSERT, UPDATE, DELETE
     private final Long userId;
+    private final boolean isDeleted;
+    private final LocalDateTime deletedAt;
     
     public RowVersion(long rowId, Map<String, Object> values, LocalDateTime timestamp, 
                       String operation, Long userId) {
@@ -23,6 +25,21 @@ public class RowVersion {
         this.timestamp = timestamp;
         this.operation = operation;
         this.userId = userId;
+        this.isDeleted = "DELETE".equals(operation);
+        this.deletedAt = isDeleted ? timestamp : null;
+    }
+    
+    /**
+     * Constructor for soft delete support.
+     */
+    public RowVersion(long rowId, Map<String, Object> values, boolean isDeleted, LocalDateTime deletedAt) {
+        this.rowId = rowId;
+        this.values = new HashMap<>(values);
+        this.timestamp = LocalDateTime.now();
+        this.operation = isDeleted ? "DELETE" : "UPDATE";
+        this.userId = null;
+        this.isDeleted = isDeleted;
+        this.deletedAt = deletedAt;
     }
     
     public long getRowId() {
@@ -47,5 +64,13 @@ public class RowVersion {
     
     public Long getUserId() {
         return userId;
+    }
+    
+    public boolean isDeleted() {
+        return isDeleted;
+    }
+    
+    public LocalDateTime getDeletedAt() {
+        return deletedAt;
     }
 }

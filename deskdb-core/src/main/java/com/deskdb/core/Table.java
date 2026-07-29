@@ -32,6 +32,12 @@ public class Table {
     private final Object lock = new Object();
     private DeskDB db;
     
+    // Version Manager for Time Travel support
+    private final VersionManager versionManager = new VersionManager();
+    
+    // Soft delete support
+    private boolean softDeleteEnabled = false;
+    
     // L2 Cache: Shared cache for frequently accessed rows
     private final Map<Long, Row> l2Cache = new ConcurrentHashMap<>(1024);
     private static final int L2_CACHE_MAX_SIZE = 10000;
@@ -127,6 +133,9 @@ public class Table {
                     indexes.get(entry.getValue()).insert((Comparable) val, rowId);
                 }
             }
+            
+            // Create version for time travel
+            versionManager.createVersion(rowId, values, false, null);
         }
     }
 
@@ -334,24 +343,104 @@ public class Table {
                     if (newVal != null) idx.insert((Comparable) newVal, rowId);
                 }
             }
+            
+            // Create version for time travel
+            versionManager.createVersion(rowId, newValues, false, null);
         }
     }
 
     public void delete(long rowId) throws IOException {
         synchronized (lock) {
-            // Invalidate cache before deletion
-            invalidateCache(rowId);
-            
-            Row row = data.remove(rowId);
+            Row row = data.get(rowId);
             if (row == null) return;
             
-            for (Map.Entry<String, String> entry : columnToIndex.entrySet()) {
-                Object val = row.get(entry.getKey());
-                if (val != null) {
-                    indexes.get(entry.getValue()).delete((Comparable) val, rowId);
+            // Soft delete: mark as deleted instead of removing
+            if (softDeleteEnabled) {
+                Map<String, Object> values = new HashMap<>(row.getValues());
+                values.put("deleted", true);
+                values.put("deleted_at", java.time.LocalDateTime.now());
+                
+                Row deletedRow = new Row(rowId, values);
+                data.put(rowId, deletedRow);
+                
+                // Create version for time travel
+                versionManager.createVersion(rowId, values, true, java.time.LocalDateTime.now());
+            } else {
+                // Hard delete: remove completely
+                // Invalidate cache before deletion
+                invalidateCache(rowId);
+                
+                data.remove(rowId);
+                
+                for (Map.Entry<String, String> entry : columnToIndex.entrySet()) {
+                    Object val = row.get(entry.getKey());
+                    if (val != null) {
+                        indexes.get(entry.getValue()).delete((Comparable) val, rowId);
+                    }
                 }
+                
+                // Create version for time travel
+                versionManager.createVersion(rowId, row.getValues(), true, java.time.LocalDateTime.now());
             }
         }
+    }
+    
+    /**
+     * Enables or disables soft delete mode.
+     */
+    public void setSoftDeleteEnabled(boolean enabled) {
+        this.softDeleteEnabled = enabled;
+    }
+    
+    /**
+     * Checks if soft delete is enabled.
+     */
+    public boolean isSoftDeleteEnabled() {
+        return softDeleteEnabled;
+    }
+    
+    /**
+     * Restores a soft-deleted row.
+     */
+    public void restore(long rowId) throws IOException {
+        synchronized (lock) {
+            Row row = data.get(rowId);
+            if (row == null) return;
+            
+            Map<String, Object> values = new HashMap<>(row.getValues());
+            values.put("deleted", false);
+            values.put("deleted_at", null);
+            
+            Row restoredRow = new Row(rowId, values);
+            data.put(rowId, restoredRow);
+            
+            // Invalidate cache
+            invalidateCache(rowId);
+            
+            // Create version for time travel
+            versionManager.createVersion(rowId, values, false, null);
+        }
+    }
+    
+    /**
+     * Gets the version history for a specific row.
+     */
+    public List<RowVersion> getVersionHistory(long rowId) {
+        return versionManager.getHistory(rowId);
+    }
+    
+    /**
+     * Gets the state of a row as of a specific point in time.
+     */
+    public RowVersion getVersionAsOf(long rowId, java.time.LocalDateTime asOf) {
+        return versionManager.getVersionAsOf(rowId, asOf);
+    }
+    
+    /**
+     * Gets the version manager for advanced time travel operations.
+     */
+    public VersionManager getVersionManager() {
+        return versionManager;
     }
     
     /**
