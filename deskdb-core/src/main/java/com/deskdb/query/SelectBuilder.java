@@ -104,8 +104,16 @@ public class SelectBuilder {
                 QueryPlan plan = optimizer.optimize(query, table);
                 
                 if (plan.useIndex()) {
-                    // Ejecutar usando el índice del plan
-                    results = executeWithIndex(table, plan);
+                    // Verificar si el filtro primario es simple (no compuesto)
+                    Filter primaryFilter = plan.getPrimaryFilter();
+                    if (primaryFilter != null && 
+                        primaryFilter.getLogicalOp() == Filter.LogicalOperator.NONE) {
+                        // Ejecutar usando el índice del plan
+                        results = executeWithIndex(table, plan);
+                    } else {
+                        // Filtro compuesto - usar full scan
+                        results = table.select(filters);
+                    }
                 } else {
                     // Fallback a ejecución normal
                     results = table.select(filters);

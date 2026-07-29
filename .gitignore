@@ -1,52 +1,40 @@
 ```
-# Dependencies
+# Compiled and build artifacts
+*.class
+*.o
+*.obj
+*.out
+build/
 target/
 
-# IDE files
-.idea/
-.vscode/
+# Dependencies
+.gradle/
+.mypy_cache/
+.pytest_cache/
+__pycache__/
+coverage/
+htmlcov/
+.dist/
+.venv/
+venv/
 
-# Compiled files
-*.class
-*.jar
-*.war
-*.ear
-*.so
-*.dll
-*.dylib
-
-# Build artifacts
-build/
-dist/
-out/
-
-# Logs
+# Logs and temp files
 *.log
+*.tmp
+*.swp
+
+# Editors
+.vscode/
+.idea/
 
 # Environment
 .env
 .env.local
 *.env.*
 
-# Python related (if applicable)
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-env/
-venv/
-.venv/
-pip-log.txt
-pip-delete-this-directory.txt
-.tox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.log
-.gradle/
-node_modules/
+# System files
+.DS_Store
+Thumbs.db
+
+# Original rules preserved
 ```
