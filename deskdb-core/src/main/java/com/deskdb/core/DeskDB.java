@@ -69,7 +69,8 @@ public class DeskDB implements AutoCloseable {
             if (dbPath.getParent() != null) {
                 Files.createDirectories(dbPath.getParent());
             }
-            saveToFile();
+            // No guardar inmediatamente, el primer checkpoint o close lo hará
+            // Esto evita errores cuando dbPath es un directorio temporal
         }
         
         // Initialize ObjectStore AFTER loading data to ensure proper order
