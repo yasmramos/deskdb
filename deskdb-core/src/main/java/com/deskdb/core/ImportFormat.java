@@ -6,5 +6,6 @@ package com.deskdb.core;
 public enum ImportFormat {
     CSV,
     JSON,
-    XML
+    XML,
+    PARQUET
 }

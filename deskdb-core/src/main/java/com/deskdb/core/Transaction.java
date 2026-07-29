@@ -74,6 +74,14 @@ public class Transaction implements AutoCloseable {
     public TableOperations table(String tableName) { 
         return db.table(tableName, this); 
     }
+    
+    /**
+     * Get the DeskDB instance associated with this transaction.
+     * @return the DeskDB instance
+     */
+    public DeskDB getDb() {
+        return db;
+    }
 
     public void commit() {
         if (!active) throw new IllegalStateException("Transaction already closed");

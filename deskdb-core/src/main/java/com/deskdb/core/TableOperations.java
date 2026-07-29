@@ -5,6 +5,8 @@ import com.deskdb.query.InsertBuilder;
 import com.deskdb.query.UpdateBuilder;
 import com.deskdb.query.DeleteBuilder;
 import com.deskdb.query.HistoryBuilder;
+import com.deskdb.query.ExportBuilder;
+import com.deskdb.query.ImportBuilder;
 
 public class TableOperations {
     private final DeskDB db;
@@ -90,6 +92,38 @@ public class TableOperations {
         builder.set("deleted", false);
         builder.set("deletedAt", null);
         return builder;
+    }
+
+    /**
+     * Creates an ExportBuilder for exporting table data.
+     * Usage: db.table("users").export().format(ExportFormat.CSV).toFile("users.csv")
+     * @return a new ExportBuilder instance
+     */
+    public ExportBuilder export() {
+        if (transaction != null) {
+            return new ExportBuilder(transaction, tableName);
+        }
+        Table table = db.getTable(tableName);
+        if (table == null) {
+            throw new RuntimeException("Table '" + tableName + "' not found");
+        }
+        return new ExportBuilder(table);
+    }
+
+    /**
+     * Creates an ImportBuilder for importing table data.
+     * Usage: db.table("users").import().format(ImportFormat.JSON).fromFile("users.json")
+     * @return a new ImportBuilder instance
+     */
+    public ImportBuilder importData() {
+        if (transaction != null) {
+            return new ImportBuilder(transaction, tableName);
+        }
+        Table table = db.getTable(tableName);
+        if (table == null) {
+            throw new RuntimeException("Table '" + tableName + "' not found");
+        }
+        return new ImportBuilder(table);
     }
 
     // Helper para WHERE directo: db.table("x").where("col").is(val).select()

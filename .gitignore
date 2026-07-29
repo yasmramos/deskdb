@@ -8,6 +8,8 @@
 *.so
 *.a
 *.out
+build/
+target/
 
 # Dependencies
 node_modules/
@@ -16,12 +18,9 @@ venv/
 __pycache__/
 .mypy_cache/
 .pytest_cache/
-target/
 .gradle/
-
-# Build directories
-dist/
-build/
+julia-*/
+zig*/
 
 # Editor/IDE files
 .vscode/
@@ -37,10 +36,8 @@ Thumbs.db
 .env.local
 *.env.*
 
-# Logs
+# Logs and coverage
 *.log
-
-# Coverage
 coverage/
 htmlcov/
 .coverage
@@ -64,4 +61,8 @@ htmlcov/
 *.Z
 *.lz
 *.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
 ```
