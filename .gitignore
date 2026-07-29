@@ -4,14 +4,17 @@
 *.o
 *.obj
 *.out
-*.exe
-*.dll
-*.so
-*.a
+build/
+target/
 
 # Dependencies
 .gradle/
-target/
+.mypy_cache/
+.pytest_cache/
+__pycache__/
+coverage/
+htmlcov/
+*.coverage
 
 # Logs and temp files
 *.log
@@ -21,14 +24,13 @@ target/
 # Editors
 .vscode/
 .idea/
-*.swp
-*.swo
 
-# Coverage reports
-coverage/
-htmlcov/
-.coverage
+# Environment
+.env
+.env.local
+*.env.*
 
-# Test reports
-test-results/
+# System files
+.DS_Store
+Thumbs.db
 ```
