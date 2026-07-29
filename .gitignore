@@ -14,27 +14,34 @@ target/
 __pycache__/
 coverage/
 htmlcov/
-.dist/
-.venv/
+.nyc_output/
+node_modules/
 venv/
+.venv/
+.julia/
+zig*/
 
 # Logs and temp files
 *.log
 *.tmp
 *.swp
-
-# Editors
-.vscode/
-.idea/
+*.swo
 
 # Environment
 .env
 .env.local
 *.env.*
 
-# System files
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# System
 .DS_Store
 Thumbs.db
 
-# Original rules preserved
+# Coverage
+.coverage
 ```
