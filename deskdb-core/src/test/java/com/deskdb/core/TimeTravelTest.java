@@ -23,7 +23,7 @@ class TimeTravelTest {
     static void setUp() throws Exception {
         dbDir = new File(System.getProperty("java.io.tmpdir"), "deskdb_timetravel_" + System.currentTimeMillis());
         dbDir.mkdirs();
-        db = new DeskDB(dbDir.toPath());
+        db = DeskDB.open(dbDir.toPath());
     }
 
     @AfterAll
@@ -71,7 +71,7 @@ class TimeTravelTest {
         try {
             db.table("users")
                 .delete()
-                .where(u -> u.field("id").gt(0))
+                .where("id").greaterThan(0)
                 .execute();
         } catch (Exception e) {
             // Ignore cleanup errors
