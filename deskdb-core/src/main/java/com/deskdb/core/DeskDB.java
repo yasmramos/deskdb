@@ -225,8 +225,11 @@ public class DeskDB implements AutoCloseable {
      */
     public void close() throws IOException {
         if (!closed) {
-            // Save data to file first
-            saveToFile();
+            // Only save to file if dbPath is a file, not a directory
+            // In normal operation, dbPath is a directory and data is stored in .data files
+            if (java.nio.file.Files.isRegularFile(dbPath)) {
+                saveToFile();
+            }
             
             // Close and truncate WAL since data is now persisted
             if (wal != null) {
