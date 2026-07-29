@@ -23,6 +23,14 @@ class ExportImportTest {
         dbDir.mkdirs();
         db = new DeskDB(dbDir.getAbsolutePath());
         
+        // Create users table using the correct API
+        db.createTable("users",
+            new Column("id", DataType.INT).primaryKey(),
+            new Column("name", DataType.STRING),
+            new Column("age", DataType.INT),
+            new Column("email", DataType.STRING)
+        );
+        
         testFile = new File(dbDir, "test_export.csv");
     }
 
@@ -38,23 +46,42 @@ class ExportImportTest {
 
     @BeforeEach
     void setupTest() throws Exception {
-        // Create users table for testing
-        try {
-            db.execute("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(100), age INT, email VARCHAR(100))");
-        } catch (Exception e) {
-            // Table might already exist, ignore
-        }
-        
-        // Insert test data
-        db.execute("INSERT INTO users (id, name, age, email) VALUES (1, 'John', 25, 'john@example.com')");
-        db.execute("INSERT INTO users (id, name, age, email) VALUES (2, 'Jane', 30, 'jane@example.com')");
-        db.execute("INSERT INTO users (id, name, age, email) VALUES (3, 'Bob', 35, 'bob@example.com')");
+        // Insert test data using fluent API
+        db.table("users")
+            .insert()
+            .values(row -> row
+                .value("id", 1)
+                .value("name", "John")
+                .value("age", 25)
+                .value("email", "john@example.com"))
+            .execute();
+            
+        db.table("users")
+            .insert()
+            .values(row -> row
+                .value("id", 2)
+                .value("name", "Jane")
+                .value("age", 30)
+                .value("email", "jane@example.com"))
+            .execute();
+            
+        db.table("users")
+            .insert()
+            .values(row -> row
+                .value("id", 3)
+                .value("name", "Bob")
+                .value("age", 35)
+                .value("email", "bob@example.com"))
+            .execute();
     }
 
     @AfterEach
     void cleanupTest() throws Exception {
         try {
-            db.execute("DELETE FROM users WHERE id > 0");
+            db.table("users")
+                .delete()
+                .where("id").gt(0)
+                .execute();
         } catch (Exception e) {
             // Ignore cleanup errors
         }
@@ -104,7 +131,10 @@ class ExportImportTest {
     @DisplayName("Should handle export with no data gracefully")
     void shouldHandleExportWithNoData() throws Exception {
         // Delete all data first
-        db.execute("DELETE FROM users WHERE id > 0");
+        db.table("users")
+            .delete()
+            .where("id").gt(0)
+            .execute();
         
         File emptyFile = new File(dbDir, "empty_export.csv");
         

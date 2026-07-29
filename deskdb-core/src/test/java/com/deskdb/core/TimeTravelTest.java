@@ -43,7 +43,7 @@ class TimeTravelTest {
             db.table("users")
                 .create()
                 .column("id", DataType.INT).primaryKey()
-                .column("name", DataType.VARCHAR, 100)
+                .column("name", DataType.STRING, 100)
                 .column("age", DataType.INT)
                 .execute();
         } catch (Exception e) {

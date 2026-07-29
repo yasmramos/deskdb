@@ -41,28 +41,28 @@ class SoftDeleteRestoreTest {
         db.table("users")
             .insert()
             .values(user -> user
-                .set("id", 1)
-                .set("name", "John")
-                .set("age", 25)
-                .set("deleted", false))
+                .value("id", 1)
+                .value("name", "John")
+                .value("age", 25)
+                .value("deleted", false))
             .execute();
             
         db.table("users")
             .insert()
             .values(user -> user
-                .set("id", 2)
-                .set("name", "Jane")
-                .set("age", 30)
-                .set("deleted", false))
+                .value("id", 2)
+                .value("name", "Jane")
+                .value("age", 30)
+                .value("deleted", false))
             .execute();
             
         db.table("users")
             .insert()
             .values(user -> user
-                .set("id", 3)
-                .set("name", "Bob")
-                .set("age", 35)
-                .set("deleted", false))
+                .value("id", 3)
+                .value("name", "Bob")
+                .value("age", 35)
+                .value("deleted", false))
             .execute();
     }
 
@@ -99,8 +99,8 @@ class SoftDeleteRestoreTest {
         assertNotNull(after);
         assertEquals(1, after.size());
         Map<String, Object> values = after.get(0).getValues();
-        Boolean deleted = (Boolean) values.get("deleted");
-        assertTrue(deleted != null && deleted, "Row should be marked as deleted");
+        Boolean isDeleted = (Boolean) values.get("deleted");
+        assertTrue(isDeleted != null && isDeleted, "Row should be marked as deleted");
     }
 
     @Test
