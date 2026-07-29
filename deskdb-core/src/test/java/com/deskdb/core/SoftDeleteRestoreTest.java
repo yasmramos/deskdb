@@ -23,6 +23,14 @@ class SoftDeleteRestoreTest {
         dbDir = new File(System.getProperty("java.io.tmpdir"), "deskdb_softdelete_" + System.currentTimeMillis());
         dbDir.mkdirs();
         db = DeskDB.open(dbDir.toPath());
+        
+        // Create the users table with proper schema
+        db.createTable("users",
+            new Column("id", DataType.LONG).primaryKey(),
+            new Column("name", DataType.STRING),
+            new Column("age", DataType.INT),
+            new Column("deleted", DataType.BOOLEAN)
+        );
     }
 
     @AfterAll
