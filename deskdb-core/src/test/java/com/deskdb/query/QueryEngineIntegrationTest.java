@@ -1,7 +1,6 @@
 package com.deskdb.query;
 
 import com.deskdb.core.*;
-import com.deskdb.index.BTree;
 import org.junit.jupiter.api.*;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -12,10 +11,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Integration tests for Query Engine components:
- * - QueryOptimizer
- * - QueryPlan
- * - SelectBuilder
  * - Filter operations
+ * - Basic query execution
  */
 @DisplayName("Query Engine Integration Tests")
 public class QueryEngineIntegrationTest {
@@ -58,7 +55,6 @@ public class QueryEngineIntegrationTest {
     
     /**
      * Helper method to insert a product into a specific database instance.
-     * Use this in nested test classes with their own database instances.
      */
     protected static void insertProduct(DeskDB database, Long id, String name, Double price, 
                                Integer quantity, String category, Boolean active) throws Exception {
@@ -81,6 +77,103 @@ public class QueryEngineIntegrationTest {
             Files.delete(tempDbPath);
         }
     }
+    
+    @Nested
+    @DisplayName("Where Condition Tests")
+    class WhereConditionTests {
+        
+        @Test
+        @DisplayName("Should filter with AND where and multiple equal conditions")
+        void testAndWhereWithMultipleEqualConditions() throws Exception {
+            List<Entity> results = db.table("products").select()
+                .where("category").eq("Electronics")
+                .andWhere("active").eq(true)
+                .execute();
+            
+            assertEquals(5, results.size(), "Should return 5 active electronics products");
+            for (Entity entity : results) {
+                assertEquals("Electronics", entity.get("category"));
+                assertEquals(true, entity.get("active"));
+            }
+        }
+        
+        @Test
+        @DisplayName("Should filter with AND where and mixed operators")
+        void testAndWhereWithMixedOperators() throws Exception {
+            List<Entity> results = db.table("products").select()
+                .where("price").gt(100.0)
+                .andWhere("quantity").lt(100)
+                .execute();
+            
+            assertTrue(results.size() >= 1, "Should return at least 1 product");
+            for (Entity entity : results) {
+                Double price = (Double) entity.get("price");
+                Integer quantity = (Integer) entity.get("quantity");
+                assertTrue(price > 100.0, "Price should be greater than 100");
+                assertTrue(quantity < 100, "Quantity should be less than 100");
+            }
+        }
+        
+        @Test
+        @DisplayName("Should handle AND where with no matching results")
+        void testAndWhereWithNoMatchingResults() throws Exception {
+            List<Entity> results = db.table("products").select()
+                .where("category").eq("NonExistent")
+                .andWhere("active").eq(true)
+                .execute();
+            
+            assertEquals(0, results.size(), "Should return no results");
+        }
+        
+        @Test
+        @DisplayName("Should filter with AND where and not equal operator")
+        void testAndWhereWithNotEqualOperator() throws Exception {
+            List<Entity> results = db.table("products").select()
+                .where("category").ne("Electronics")
+                .andWhere("active").eq(true)
+                .execute();
+            
+            assertTrue(results.size() >= 1, "Should return non-electronics products");
+            for (Entity entity : results) {
+                assertNotEquals("Electronics", entity.get("category"));
+                assertEquals(true, entity.get("active"));
+            }
+        }
+        
+        @Test
+        @DisplayName("Should handle complex query with multiple AND where clauses")
+        void testComplexQueryWithMultipleAndWhere() throws Exception {
+            List<Entity> results = db.table("products").select()
+                .where("active").eq(true)
+                .andWhere("price").gt(50.0)
+                .andWhere("quantity").gt(40)
+                .execute();
+            
+            assertTrue(results.size() >= 1, "Should return products matching all conditions");
+            for (Entity entity : results) {
+                assertEquals(true, entity.get("active"));
+                assertTrue((Double) entity.get("price") > 50.0);
+                assertTrue((Integer) entity.get("quantity") > 40);
+            }
+        }
+        
+        @Test
+        @DisplayName("Should handle AND where with BETWEEN operator")
+        void testAndWhereWithBetweenOperator() throws Exception {
+            List<Entity> results = db.table("products").select()
+                .where("price").between(50.0, 150.0)
+                .andWhere("active").eq(true)
+                .execute();
+            
+            assertTrue(results.size() >= 1, "Should return products in price range");
+            for (Entity entity : results) {
+                Double price = (Double) entity.get("price");
+                assertTrue(price >= 50.0 && price <= 150.0, "Price should be between 50 and 150");
+                assertEquals(true, entity.get("active"));
+            }
+        }
+    }
+}
     
     @Nested
     @DisplayName("Query Optimizer Tests")
