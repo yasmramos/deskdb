@@ -126,8 +126,8 @@ public class ObjectStore {
                 db.createIndex(INTERNAL_TABLE_NAME, "idx_class_name", "class_name");
                 db.createIndex(INTERNAL_TABLE_NAME, "idx_id", "id");
                 
-                // Save immediately after creating table to ensure consistency
-                db.saveToFile();
+                // Note: No need to save immediately here - data will be persisted on close
+                // or during normal checkpoint operations
             }
         } catch (IOException e) {
             throw new RuntimeException("Failed to initialize internal object store table", e);

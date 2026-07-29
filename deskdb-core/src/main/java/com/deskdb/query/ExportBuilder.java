@@ -97,7 +97,12 @@ public class ExportBuilder {
      */
     public void toFile(String filePath) throws Exception {
         Path path = Paths.get(filePath);
-        Files.createDirectories(path.getParent());
+        Path parent = path.getParent();
+        
+        // Check if parent directory exists, throw exception if not
+        if (parent != null && Files.notExists(parent)) {
+            throw new IOException("Parent directory does not exist: " + parent.toString());
+        }
         
         List<Row> rows = fetchData();
         
