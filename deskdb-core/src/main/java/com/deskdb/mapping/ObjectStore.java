@@ -122,8 +122,9 @@ public class ObjectStore {
                     new com.deskdb.core.Column("data", DataType.BLOB)
                 );
                 
-                // Create composite index for fast lookups: class_name + id
-                db.createIndex(INTERNAL_TABLE_NAME, "idx_class_id", "class_name,id");
+                // Create indexes for fast lookups: class_name and id
+                db.createIndex(INTERNAL_TABLE_NAME, "idx_class_name", "class_name");
+                db.createIndex(INTERNAL_TABLE_NAME, "idx_id", "id");
                 
                 // Save immediately after creating table to ensure consistency
                 db.saveToFile();

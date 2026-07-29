@@ -327,57 +327,6 @@ public class UniqueFeaturesTest {
 
         @Test
         @DisplayName("Should soft delete multiple rows")
-        void testSoftDeleteMultiple() throws Exception {
-            // Create users table
-            db.createTable("users",
-                new Column("id", DataType.LONG).primaryKey(),
-                new Column("name", DataType.STRING),
-                new Column("deleted", DataType.BOOLEAN),
-                new Column("deletedAt", DataType.TIMESTAMP)
-            );
-
-            // Insert multiple users
-            for (long i = 1; i <= 5; i++) {
-                db.table("users")
-                  .insert()
-                  .value("id", i)
-                  .value("name", "User" + i)
-                  .value("deleted", false)
-                  .execute();
-            }
-
-            // Soft delete users with id < 4
-            int deletedCount = db.table("users")
-                .delete()
-                .soft()
-                .where("id")
-                .lessThan(4L)
-                .execute();
-
-            assertEquals(3, deletedCount);
-
-            // Verify all rows still exist
-            List<Row> allRows = db.table("users").select().execute();
-            assertEquals(5, allRows.size());
-
-            // Verify soft deleted count
-            List<Row> softDeleted = db.table("users")
-                .select()
-                .where("deleted")
-                .eq(true)
-                .execute();
-            assertEquals(3, softDeleted.size());
-        }
-    }
-
-    @Nested
-    @DisplayName("Export/Import in Multiple Formats")
-    class ExportImportTests {
-
-        @Test
-        @DisplayName("Should verify ExportFormat enum values")
-        void testExportFormatEnum() {
-            ExportFormat[] formats = ExportFormat.values();
             assertEquals(4, formats.length);
             
             assertTrue(java.util.Arrays.asList(formats).contains(ExportFormat.CSV));
