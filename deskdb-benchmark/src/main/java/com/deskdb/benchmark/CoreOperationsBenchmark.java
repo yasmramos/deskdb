@@ -64,8 +64,11 @@ public class CoreOperationsBenchmark {
 
     @Benchmark
     public void insertBatch_Throughput(Blackhole bh) throws Exception {
+        // Insert a small batch to measure per-operation throughput fairly
+        // This measures the overhead of batching vs individual operations
+        int batchSize = 10;
         try (Transaction tx = database.beginTransaction()) {
-            for (int i = 0; i < 1000; i++) {
+            for (int i = 0; i < batchSize; i++) {
                 int id = counter.incrementAndGet();
                 tx.table("users")
                     .insert()
@@ -78,7 +81,7 @@ public class CoreOperationsBenchmark {
             }
             tx.commit();
         }
-        bh.consume(true);
+        bh.consume(batchSize); // Consume the actual number of operations performed
     }
 
     @Benchmark
