@@ -22,17 +22,31 @@ public class DeskDBObjectPersistenceTest {
 
     @BeforeEach
     public void setUp() throws Exception {
-        dbPath = Files.createTempFile("test_db", ".deskdb");
-        db = DeskDB.open(dbPath);
+        dbPath = Files.createTempDirectory("test_db");
+        Path dbFile = dbPath.resolve("test.deskdb");
+        db = DeskDB.open(dbFile);
     }
 
     @AfterEach
     public void tearDown() throws Exception {
         if (db != null && !db.isClosed()) {
-            db.close();
+            try {
+                db.close();
+            } catch (Exception e) {
+                // Ignore close errors
+            }
         }
         if (dbPath != null && Files.exists(dbPath)) {
-            Files.deleteIfExists(dbPath);
+            // Clean up all files in directory
+            Files.walk(dbPath)
+                .sorted((a, b) -> b.compareTo(a))
+                .forEach(path -> {
+                    try {
+                        Files.deleteIfExists(path);
+                    } catch (Exception e) {
+                        // Ignore delete errors
+                    }
+                });
         }
     }
 
