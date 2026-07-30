@@ -37,10 +37,10 @@ public class Wal implements AutoCloseable {
     private static final int HEADER_SIZE = 20; // 10 magic + 4 version + 4 checksum + 2 length
     
     // Configuración de buffering optimizada para alto rendimiento
-    private static final int DEFAULT_BUFFER_SIZE = 2048; // Número máximo de entradas en buffer (duplicado)
-    private static final long FLUSH_INTERVAL_MS = 50; // Intervalo de flush en ms (aumentado para tests)
-    private static final int BATCH_COMMIT_THRESHOLD = 200; // Commit después de N operaciones (duplicado)
-    private static final int MIN_BATCH_SIZE = 10; // Mínimo de entradas para hacer flush eficiente
+    private static final int DEFAULT_BUFFER_SIZE = 4096; // Número máximo de entradas en buffer
+    private static final long FLUSH_INTERVAL_MS = 5; // Intervalo de flush en ms (reducido para baja latencia)
+    private static final int BATCH_COMMIT_THRESHOLD = 100; // Commit después de N operaciones
+    private static final int MIN_BATCH_SIZE = 8; // Mínimo de entradas para hacer flush eficiente
     
     private final Path walPath;
     private final FileChannel channel;
@@ -198,11 +198,17 @@ public class Wal implements AutoCloseable {
         long timestamp = System.currentTimeMillis();
         WalEntry entry = new WalEntry(timestamp, transactionId, operation, tableName, key, data);
         
-        // Escritura síncrona directa para evitar problemas con async en tests
-        synchronized (this) {
-            writeBuffer.offer(entry);
+        // Añadir al buffer y hacer flush asíncrono para alto rendimiento
+        if (!writeBuffer.offer(entry)) {
+            // Buffer lleno, hacer flush síncrono
+            synchronized (this) {
+                doFlush();
+                writeBuffer.offer(entry);
+                pendingOperations++;
+            }
+        } else {
             pendingOperations++;
-            doFlush();
+            scheduleFlush();
         }
         
         logger.trace("WAL entry written: tx={}, op={}, table={}, key={}", 
