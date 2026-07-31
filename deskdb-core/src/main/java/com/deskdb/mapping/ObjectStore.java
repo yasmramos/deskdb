@@ -556,7 +556,7 @@ public class ObjectStore {
             // Execute within a transaction for ACID guarantees
             try (Transaction tx = db.beginTransaction()) {
                 // UPSERT: Delete if exists, then insert (more efficient than SELECT + UPDATE/INSERT)
-                var existingResults = db.table(INTERNAL_TABLE_NAME).table(tx)
+                var existingResults = db.table(INTERNAL_TABLE_NAME, tx)
                     .select()
                     .where("class_name").eq(typeName)
                     .execute();
@@ -567,7 +567,7 @@ public class ObjectStore {
                     Long convertedId = convertId(id);
                     if (convertedEntityId != null && convertedId != null && 
                         convertedEntityId.equals(convertedId)) {
-                        db.table(INTERNAL_TABLE_NAME).table(tx)
+                        db.table(INTERNAL_TABLE_NAME, tx)
                             .delete()
                             .where("id").eq(row.getRowId())
                             .execute();
@@ -580,7 +580,7 @@ public class ObjectStore {
                 if (storedId == null) {
                     throw new RuntimeException("Cannot store entity with null ID");
                 }
-                db.table(INTERNAL_TABLE_NAME).table(tx)
+                db.table(INTERNAL_TABLE_NAME, tx)
                     .insert()
                     .value("id", storedId)
                     .value("class_name", typeName)
