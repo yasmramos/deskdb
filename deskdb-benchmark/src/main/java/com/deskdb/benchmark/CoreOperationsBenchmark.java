@@ -16,13 +16,18 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * Benchmark for core database operations including insert, update, select, and delete.
  * Measures throughput and performance characteristics of DeskDB operations.
+ * 
+ * Configuration optimized for statistical validity:
+ * - 10 measurement iterations for reliable confidence intervals
+ * - 5 warmup iterations to reach steady state
+ * - 2 JVM forks to account for JVM-specific optimizations
  */
 @State(Scope.Thread)
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.SECONDS)
-@Warmup(iterations = 2, time = 3)
-@Measurement(iterations = 3, time = 5)
-@Fork(1)
+@Warmup(iterations = 5, time = 3)
+@Measurement(iterations = 10, time = 5)
+@Fork(2)
 public class CoreOperationsBenchmark {
 
     private DeskDB database;

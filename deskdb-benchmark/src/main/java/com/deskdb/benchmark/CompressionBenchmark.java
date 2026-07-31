@@ -10,6 +10,11 @@ import java.util.concurrent.TimeUnit;
 /**
  * Benchmark comparativo de compresión RLE vs datos sin comprimir.
  * Mide throughput y ratio de compresión para diferentes patrones de datos.
+ * 
+ * Configuration optimized for statistical validity:
+ * - 5 measurement iterations with 10 seconds each for reliable metrics
+ * - 3 warmup iterations to reach steady state
+ * - 2 JVM forks to account for JVM-specific optimizations
  */
 @State(Scope.Thread)
 @BenchmarkMode(Mode.Throughput)
