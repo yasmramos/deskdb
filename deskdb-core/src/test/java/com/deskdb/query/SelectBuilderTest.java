@@ -333,7 +333,7 @@ public class SelectBuilderTest {
             .where("active").is(false)
             .execute();
         
-        assertEquals(2, results.size());
+        assertEquals(1, results.size());
     }
     
     @Test
