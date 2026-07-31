@@ -3,6 +3,7 @@ package com.deskdb.mapping;
 import com.deskdb.core.DeskDB;
 import com.deskdb.core.DataType;
 import com.deskdb.core.BinarySerializer;
+import com.deskdb.core.Transaction;
 import com.deskdb.mapping.annotations.Id;
 
 import java.io.ByteArrayOutputStream;
@@ -552,41 +553,45 @@ public class ObjectStore {
         try {
             byte[] data = serialize(entity);
             
-            // UPSERT: Delete if exists, then insert (more efficient than SELECT + UPDATE/INSERT)
-            // Note: Using workaround since DeleteBuilder doesn't support .and() yet
-            var existingResults = db.table(INTERNAL_TABLE_NAME)
-                .select()
-                .where("class_name").eq(typeName)
-                .execute();
-            
-            for (var row : existingResults) {
-                Object entityId = row.get("id");
-                Long convertedEntityId = convertId(entityId);
-                Long convertedId = convertId(id);
-                if (convertedEntityId != null && convertedId != null && 
-                    convertedEntityId.equals(convertedId)) {
-                    db.table(INTERNAL_TABLE_NAME)
-                        .delete()
-                        .where("id").eq(row.getRowId())
-                        .execute();
-                    break;
+            // Execute within a transaction for ACID guarantees
+            try (Transaction tx = db.beginTransaction()) {
+                // UPSERT: Delete if exists, then insert (more efficient than SELECT + UPDATE/INSERT)
+                var existingResults = db.table(INTERNAL_TABLE_NAME, tx)
+                    .select()
+                    .where("class_name").eq(typeName)
+                    .execute();
+                
+                for (var row : existingResults) {
+                    Object entityId = row.get("id");
+                    Long convertedEntityId = convertId(entityId);
+                    Long convertedId = convertId(id);
+                    if (convertedEntityId != null && convertedId != null && 
+                        convertedEntityId.equals(convertedId)) {
+                        db.table(INTERNAL_TABLE_NAME, tx)
+                            .delete()
+                            .where("id").eq(row.getRowId())
+                            .execute();
+                        break;
+                    }
                 }
+                
+                // Insert new
+                Long storedId = convertId(id);
+                if (storedId == null) {
+                    throw new RuntimeException("Cannot store entity with null ID");
+                }
+                db.table(INTERNAL_TABLE_NAME, tx)
+                    .insert()
+                    .value("id", storedId)
+                    .value("class_name", typeName)
+                    .value("data", data)
+                    .execute();
+                
+                tx.commit();
             }
             
-            // Insert new
-            Long storedId = convertId(id);
-            if (storedId == null) {
-                throw new RuntimeException("Cannot store entity with null ID");
-            }
-            db.table(INTERNAL_TABLE_NAME)
-                .insert()
-                .value("id", storedId)
-                .value("class_name", typeName)
-                .value("data", data)
-                .execute();
-            
-            // Update cache and index
-            cacheEntity(typeName, id, entity, getCurrentTransactionVersion());
+            // Update cache and index after successful commit
+            cacheEntity(typeName, id, entity, 0);
             classIndex.computeIfAbsent(typeName, k -> ConcurrentHashMap.newKeySet()).add(id);
         } catch (Exception e) {
             throw new RuntimeException("Failed to store entity", e);
@@ -832,7 +837,7 @@ public class ObjectStore {
                 .execute();
             
             // Update cache and index
-            cacheEntity(typeName, id, entity, getCurrentTransactionVersion());
+            cacheEntity(typeName, id, entity, 0);
             classIndex.computeIfAbsent(typeName, k -> ConcurrentHashMap.newKeySet()).add(id);
         } catch (Exception e) {
             throw new RuntimeException("Failed to store entity", e);
