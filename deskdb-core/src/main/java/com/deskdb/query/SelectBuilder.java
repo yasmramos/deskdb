@@ -117,6 +117,7 @@ public class SelectBuilder {
     public SelectBuilder where(Consumer<WhereConditionBuilder> predicate) {
         WhereConditionBuilder builder = new WhereConditionBuilder(this);
         predicate.accept(builder);
+        builder.applyFilter();
         return this;
     }
 
@@ -551,6 +552,7 @@ public class SelectBuilder {
      */
     public static class WhereConditionBuilder {
         private final SelectBuilder selectBuilder;
+        private Filter accumulatedFilter = null;
         
         public WhereConditionBuilder(SelectBuilder selectBuilder) {
             this.selectBuilder = selectBuilder;
@@ -563,22 +565,43 @@ public class SelectBuilder {
          * @return FieldCondition builder
          */
         public FieldCondition field(String fieldName) {
-            return new FieldCondition(fieldName, selectBuilder);
+            return new FieldCondition(fieldName, this);
+        }
+        
+        /**
+         * Applies the accumulated filter to the select builder.
+         * Called automatically when the lambda completes.
+         */
+        void applyFilter() {
+            if (accumulatedFilter != null) {
+                selectBuilder.filters.add(accumulatedFilter);
+            }
+        }
+        
+        /**
+         * Adds or combines a filter with the accumulated filter using AND.
+         */
+        void addFilter(Filter newFilter) {
+            if (accumulatedFilter == null) {
+                accumulatedFilter = newFilter;
+            } else {
+                accumulatedFilter = accumulatedFilter.and(newFilter);
+            }
         }
     }
     
     /**
      * Builder for field-specific conditions.
+     * Combines multiple conditions with AND operator.
+     * All filters in the list are automatically combined with AND during execution.
      */
     public static class FieldCondition {
         private final String fieldName;
-        private final SelectBuilder selectBuilder;
-        private Filter lastFilter; // Track the last filter to combine with AND
+        private final WhereConditionBuilder whereBuilder;
         
-        public FieldCondition(String fieldName, SelectBuilder selectBuilder) {
+        public FieldCondition(String fieldName, WhereConditionBuilder whereBuilder) {
             this.fieldName = fieldName;
-            this.selectBuilder = selectBuilder;
-            this.lastFilter = null;
+            this.whereBuilder = whereBuilder;
         }
         
         /**
@@ -589,7 +612,7 @@ public class SelectBuilder {
          */
         public FieldCondition eq(Object value) {
             Filter newFilter = new Filter(fieldName, Filter.Operator.EQ, value);
-            addOrCombineFilter(newFilter);
+            addFilterWithAndLogic(newFilter);
             return this;
         }
         
@@ -601,7 +624,7 @@ public class SelectBuilder {
          */
         public FieldCondition ne(Object value) {
             Filter newFilter = new Filter(fieldName, Filter.Operator.NE, value);
-            addOrCombineFilter(newFilter);
+            addFilterWithAndLogic(newFilter);
             return this;
         }
         
@@ -613,7 +636,7 @@ public class SelectBuilder {
          */
         public FieldCondition gt(Object value) {
             Filter newFilter = new Filter(fieldName, Filter.Operator.GT, value);
-            addOrCombineFilter(newFilter);
+            addFilterWithAndLogic(newFilter);
             return this;
         }
         
@@ -625,7 +648,7 @@ public class SelectBuilder {
          */
         public FieldCondition gte(Object value) {
             Filter newFilter = new Filter(fieldName, Filter.Operator.GTE, value);
-            addOrCombineFilter(newFilter);
+            addFilterWithAndLogic(newFilter);
             return this;
         }
         
@@ -637,7 +660,7 @@ public class SelectBuilder {
          */
         public FieldCondition lt(Object value) {
             Filter newFilter = new Filter(fieldName, Filter.Operator.LT, value);
-            addOrCombineFilter(newFilter);
+            addFilterWithAndLogic(newFilter);
             return this;
         }
         
@@ -649,7 +672,7 @@ public class SelectBuilder {
          */
         public FieldCondition lte(Object value) {
             Filter newFilter = new Filter(fieldName, Filter.Operator.LTE, value);
-            addOrCombineFilter(newFilter);
+            addFilterWithAndLogic(newFilter);
             return this;
         }
         
@@ -662,28 +685,8 @@ public class SelectBuilder {
          */
         public FieldCondition between(Object from, Object to) {
             Filter newFilter = new Filter(fieldName, Filter.Operator.BETWEEN, from, to);
-            addOrCombineFilter(newFilter);
+            addFilterWithAndLogic(newFilter);
             return this;
-        }
-        
-        /**
-         * Adds a new filter or combines it with the last filter using AND.
-         */
-        private void addOrCombineFilter(Filter newFilter) {
-            if (lastFilter == null) {
-                // First filter - just add it
-                selectBuilder.addFilter(newFilter);
-                lastFilter = newFilter;
-            } else {
-                // Remove the last filter and combine it with the new one using AND
-                List<Filter> filters = selectBuilder.filters;
-                if (!filters.isEmpty()) {
-                    filters.remove(filters.size() - 1);
-                }
-                Filter combinedFilter = lastFilter.and(newFilter);
-                selectBuilder.addFilter(combinedFilter);
-                lastFilter = combinedFilter;
-            }
         }
         
         /**
@@ -702,7 +705,7 @@ public class SelectBuilder {
          * @return FieldCondition builder for the new field
          */
         public FieldCondition and(String fieldName) {
-            return new FieldCondition(fieldName, selectBuilder);
+            return new FieldCondition(fieldName, whereBuilder);
         }
         
         /**
@@ -713,7 +716,14 @@ public class SelectBuilder {
          */
         public FieldCondition or(String fieldName) {
             // TODO: Implement OR logic
-            return new FieldCondition(fieldName, selectBuilder);
+            return new FieldCondition(fieldName, whereBuilder);
+        }
+        
+        /**
+         * Helper method to combine filters with AND logic.
+         */
+        private void addFilterWithAndLogic(Filter newFilter) {
+            whereBuilder.addFilter(newFilter);
         }
     }
 }

@@ -15,12 +15,12 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("Advanced Fluent API Tests")
 public class AdvancedFluentApiTest {
 
-    private static DeskDB db;
+    private DeskDB db;
     private static final String TEST_DIR = "target/test-advanced-fluent-api";
 
-    @BeforeAll
-    public static void setUp() throws Exception {
-        // Clean up test directory
+    @BeforeEach
+    public void setUp() throws Exception {
+        // Clean up test directory before each test
         File testDir = new File(TEST_DIR);
         if (testDir.exists()) {
             deleteDirectory(testDir);
@@ -49,12 +49,12 @@ public class AdvancedFluentApiTest {
             .execute();
     }
 
-    @AfterAll
-    public static void tearDown() throws Exception {
+    @AfterEach
+    public void tearDown() throws Exception {
         if (db != null) {
             db.close();
         }
-        // Clean up test directory
+        // Clean up test directory after each test
         deleteDirectory(new File(TEST_DIR));
     }
 

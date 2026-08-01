@@ -259,10 +259,11 @@ public class UpdateBuilder {
          * @return this FieldCondition for chaining
          */
         public FieldCondition eq(Object value) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.EQ, value);
             if (updateBuilder.filter == null) {
-                updateBuilder.filter = new Filter(fieldName, Filter.Operator.EQ, value);
+                updateBuilder.filter = newFilter;
             } else {
-                updateBuilder.filter = updateBuilder.filter.and(new Filter(fieldName, Filter.Operator.EQ, value));
+                updateBuilder.filter = updateBuilder.filter.and(newFilter);
             }
             return this;
         }
@@ -274,10 +275,11 @@ public class UpdateBuilder {
          * @return this FieldCondition for chaining
          */
         public FieldCondition ne(Object value) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.NE, value);
             if (updateBuilder.filter == null) {
-                updateBuilder.filter = new Filter(fieldName, Filter.Operator.NE, value);
+                updateBuilder.filter = newFilter;
             } else {
-                updateBuilder.filter = updateBuilder.filter.and(new Filter(fieldName, Filter.Operator.NE, value));
+                updateBuilder.filter = updateBuilder.filter.and(newFilter);
             }
             return this;
         }
@@ -289,10 +291,11 @@ public class UpdateBuilder {
          * @return this FieldCondition for chaining
          */
         public FieldCondition gt(Object value) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.GT, value);
             if (updateBuilder.filter == null) {
-                updateBuilder.filter = new Filter(fieldName, Filter.Operator.GT, value);
+                updateBuilder.filter = newFilter;
             } else {
-                updateBuilder.filter = updateBuilder.filter.and(new Filter(fieldName, Filter.Operator.GT, value));
+                updateBuilder.filter = updateBuilder.filter.and(newFilter);
             }
             return this;
         }
@@ -304,10 +307,11 @@ public class UpdateBuilder {
          * @return this FieldCondition for chaining
          */
         public FieldCondition gte(Object value) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.GTE, value);
             if (updateBuilder.filter == null) {
-                updateBuilder.filter = new Filter(fieldName, Filter.Operator.GTE, value);
+                updateBuilder.filter = newFilter;
             } else {
-                updateBuilder.filter = updateBuilder.filter.and(new Filter(fieldName, Filter.Operator.GTE, value));
+                updateBuilder.filter = updateBuilder.filter.and(newFilter);
             }
             return this;
         }
@@ -319,10 +323,11 @@ public class UpdateBuilder {
          * @return this FieldCondition for chaining
          */
         public FieldCondition lt(Object value) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.LT, value);
             if (updateBuilder.filter == null) {
-                updateBuilder.filter = new Filter(fieldName, Filter.Operator.LT, value);
+                updateBuilder.filter = newFilter;
             } else {
-                updateBuilder.filter = updateBuilder.filter.and(new Filter(fieldName, Filter.Operator.LT, value));
+                updateBuilder.filter = updateBuilder.filter.and(newFilter);
             }
             return this;
         }
@@ -334,10 +339,11 @@ public class UpdateBuilder {
          * @return this FieldCondition for chaining
          */
         public FieldCondition lte(Object value) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.LTE, value);
             if (updateBuilder.filter == null) {
-                updateBuilder.filter = new Filter(fieldName, Filter.Operator.LTE, value);
+                updateBuilder.filter = newFilter;
             } else {
-                updateBuilder.filter = updateBuilder.filter.and(new Filter(fieldName, Filter.Operator.LTE, value));
+                updateBuilder.filter = updateBuilder.filter.and(newFilter);
             }
             return this;
         }
@@ -350,16 +356,18 @@ public class UpdateBuilder {
          * @return this FieldCondition for chaining
          */
         public FieldCondition between(Object from, Object to) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.BETWEEN, from, to);
             if (updateBuilder.filter == null) {
-                updateBuilder.filter = new Filter(fieldName, Filter.Operator.BETWEEN, from, to);
+                updateBuilder.filter = newFilter;
             } else {
-                updateBuilder.filter = updateBuilder.filter.and(new Filter(fieldName, Filter.Operator.BETWEEN, from, to));
+                updateBuilder.filter = updateBuilder.filter.and(newFilter);
             }
             return this;
         }
         
         /**
          * AND operator - starts condition on a new field.
+         * The new field continues building on the existing filter.
          * 
          * @param fieldName the field name
          * @return FieldCondition builder for the new field

@@ -308,10 +308,11 @@ public class DeleteBuilder {
          * @return this FieldCondition for chaining
          */
         public FieldCondition eq(Object value) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.EQ, value);
             if (deleteBuilder.filter == null) {
-                deleteBuilder.filter = new Filter(fieldName, Filter.Operator.EQ, value);
+                deleteBuilder.filter = newFilter;
             } else {
-                deleteBuilder.filter = deleteBuilder.filter.and(new Filter(fieldName, Filter.Operator.EQ, value));
+                deleteBuilder.filter = deleteBuilder.filter.and(newFilter);
             }
             return this;
         }
@@ -323,10 +324,11 @@ public class DeleteBuilder {
          * @return this FieldCondition for chaining
          */
         public FieldCondition ne(Object value) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.NE, value);
             if (deleteBuilder.filter == null) {
-                deleteBuilder.filter = new Filter(fieldName, Filter.Operator.NE, value);
+                deleteBuilder.filter = newFilter;
             } else {
-                deleteBuilder.filter = deleteBuilder.filter.and(new Filter(fieldName, Filter.Operator.NE, value));
+                deleteBuilder.filter = deleteBuilder.filter.and(newFilter);
             }
             return this;
         }
@@ -338,10 +340,11 @@ public class DeleteBuilder {
          * @return this FieldCondition for chaining
          */
         public FieldCondition gt(Object value) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.GT, value);
             if (deleteBuilder.filter == null) {
-                deleteBuilder.filter = new Filter(fieldName, Filter.Operator.GT, value);
+                deleteBuilder.filter = newFilter;
             } else {
-                deleteBuilder.filter = deleteBuilder.filter.and(new Filter(fieldName, Filter.Operator.GT, value));
+                deleteBuilder.filter = deleteBuilder.filter.and(newFilter);
             }
             return this;
         }
@@ -353,10 +356,11 @@ public class DeleteBuilder {
          * @return this FieldCondition for chaining
          */
         public FieldCondition gte(Object value) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.GTE, value);
             if (deleteBuilder.filter == null) {
-                deleteBuilder.filter = new Filter(fieldName, Filter.Operator.GTE, value);
+                deleteBuilder.filter = newFilter;
             } else {
-                deleteBuilder.filter = deleteBuilder.filter.and(new Filter(fieldName, Filter.Operator.GTE, value));
+                deleteBuilder.filter = deleteBuilder.filter.and(newFilter);
             }
             return this;
         }
@@ -368,10 +372,11 @@ public class DeleteBuilder {
          * @return this FieldCondition for chaining
          */
         public FieldCondition lt(Object value) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.LT, value);
             if (deleteBuilder.filter == null) {
-                deleteBuilder.filter = new Filter(fieldName, Filter.Operator.LT, value);
+                deleteBuilder.filter = newFilter;
             } else {
-                deleteBuilder.filter = deleteBuilder.filter.and(new Filter(fieldName, Filter.Operator.LT, value));
+                deleteBuilder.filter = deleteBuilder.filter.and(newFilter);
             }
             return this;
         }
@@ -383,10 +388,11 @@ public class DeleteBuilder {
          * @return this FieldCondition for chaining
          */
         public FieldCondition lte(Object value) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.LTE, value);
             if (deleteBuilder.filter == null) {
-                deleteBuilder.filter = new Filter(fieldName, Filter.Operator.LTE, value);
+                deleteBuilder.filter = newFilter;
             } else {
-                deleteBuilder.filter = deleteBuilder.filter.and(new Filter(fieldName, Filter.Operator.LTE, value));
+                deleteBuilder.filter = deleteBuilder.filter.and(newFilter);
             }
             return this;
         }
@@ -399,16 +405,18 @@ public class DeleteBuilder {
          * @return this FieldCondition for chaining
          */
         public FieldCondition between(Object from, Object to) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.BETWEEN, from, to);
             if (deleteBuilder.filter == null) {
-                deleteBuilder.filter = new Filter(fieldName, Filter.Operator.BETWEEN, from, to);
+                deleteBuilder.filter = newFilter;
             } else {
-                deleteBuilder.filter = deleteBuilder.filter.and(new Filter(fieldName, Filter.Operator.BETWEEN, from, to));
+                deleteBuilder.filter = deleteBuilder.filter.and(newFilter);
             }
             return this;
         }
         
         /**
          * AND operator - starts condition on a new field.
+         * The new field continues building on the existing filter.
          * 
          * @param fieldName the field name
          * @return FieldCondition builder for the new field
