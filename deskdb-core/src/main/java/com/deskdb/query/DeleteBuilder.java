@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Collections;
+import java.util.function.Consumer;
 
 /**
  * Optimized DELETE builder with direct execution path.
@@ -51,6 +52,28 @@ public class DeleteBuilder {
      */
     public DeleteBuilder soft() {
         this.softDelete = true;
+        return this;
+    }
+
+    /**
+     * Adds a filter using a lambda predicate for fluent API.
+     * <p>
+     * Example:
+     * <pre>{@code
+     * db.table("users")
+     *   .delete()
+     *   .where(user -> user
+     *       .field("age").gt(65)
+     *       .and("status").eq("inactive"))
+     *   .execute();
+     * }</pre>
+     * 
+     * @param predicate a function that builds filter conditions
+     * @return this DeleteBuilder for method chaining
+     */
+    public DeleteBuilder where(Consumer<WhereConditionBuilder> predicate) {
+        WhereConditionBuilder builder = new WhereConditionBuilder(this);
+        predicate.accept(builder);
         return this;
     }
 
@@ -207,6 +230,199 @@ public class DeleteBuilder {
 
         public WhereCondition lteCond(Object value) {
             parent.filter = new Filter(column, Filter.Operator.LTE, value);
+            return this;
+        }
+        
+        public WhereCondition gt(Object value) {
+            parent.filter = new Filter(column, Filter.Operator.GT, value);
+            return this;
+        }
+        
+        public WhereCondition gte(Object value) {
+            parent.filter = new Filter(column, Filter.Operator.GTE, value);
+            return this;
+        }
+        
+        public WhereCondition lt(Object value) {
+            parent.filter = new Filter(column, Filter.Operator.LT, value);
+            return this;
+        }
+        
+        public WhereCondition lte(Object value) {
+            parent.filter = new Filter(column, Filter.Operator.LTE, value);
+            return this;
+        }
+        
+        public WhereCondition ne(Object value) {
+            parent.filter = new Filter(column, Filter.Operator.NE, value);
+            return this;
+        }
+        
+        public WhereCondition between(Object from, Object to) {
+            parent.filter = new Filter(column, Filter.Operator.BETWEEN, from, to);
+            return this;
+        }
+        
+        public WhereCondition and(String column) {
+            return new WhereCondition(column, parent);
+        }
+    }
+    
+    /**
+     * Builder for lambda-based WHERE conditions.
+     */
+    public static class WhereConditionBuilder {
+        private final DeleteBuilder deleteBuilder;
+        
+        public WhereConditionBuilder(DeleteBuilder deleteBuilder) {
+            this.deleteBuilder = deleteBuilder;
+        }
+        
+        /**
+         * Starts a condition on the specified field.
+         * 
+         * @param fieldName the field name
+         * @return FieldCondition builder
+         */
+        public FieldCondition field(String fieldName) {
+            return new FieldCondition(fieldName, deleteBuilder);
+        }
+    }
+    
+    /**
+     * Builder for field-specific conditions in lambda expressions.
+     */
+    public static class FieldCondition {
+        private final String fieldName;
+        private final DeleteBuilder deleteBuilder;
+        
+        public FieldCondition(String fieldName, DeleteBuilder deleteBuilder) {
+            this.fieldName = fieldName;
+            this.deleteBuilder = deleteBuilder;
+        }
+        
+        /**
+         * Equals condition.
+         * 
+         * @param value the value to compare
+         * @return this FieldCondition for chaining
+         */
+        public FieldCondition eq(Object value) {
+            if (deleteBuilder.filter == null) {
+                deleteBuilder.filter = new Filter(fieldName, Filter.Operator.EQ, value);
+            } else {
+                deleteBuilder.filter = deleteBuilder.filter.and(new Filter(fieldName, Filter.Operator.EQ, value));
+            }
+            return this;
+        }
+        
+        /**
+         * Not equals condition.
+         * 
+         * @param value the value to compare
+         * @return this FieldCondition for chaining
+         */
+        public FieldCondition ne(Object value) {
+            if (deleteBuilder.filter == null) {
+                deleteBuilder.filter = new Filter(fieldName, Filter.Operator.NE, value);
+            } else {
+                deleteBuilder.filter = deleteBuilder.filter.and(new Filter(fieldName, Filter.Operator.NE, value));
+            }
+            return this;
+        }
+        
+        /**
+         * Greater than condition.
+         * 
+         * @param value the value to compare
+         * @return this FieldCondition for chaining
+         */
+        public FieldCondition gt(Object value) {
+            if (deleteBuilder.filter == null) {
+                deleteBuilder.filter = new Filter(fieldName, Filter.Operator.GT, value);
+            } else {
+                deleteBuilder.filter = deleteBuilder.filter.and(new Filter(fieldName, Filter.Operator.GT, value));
+            }
+            return this;
+        }
+        
+        /**
+         * Greater than or equal condition.
+         * 
+         * @param value the value to compare
+         * @return this FieldCondition for chaining
+         */
+        public FieldCondition gte(Object value) {
+            if (deleteBuilder.filter == null) {
+                deleteBuilder.filter = new Filter(fieldName, Filter.Operator.GTE, value);
+            } else {
+                deleteBuilder.filter = deleteBuilder.filter.and(new Filter(fieldName, Filter.Operator.GTE, value));
+            }
+            return this;
+        }
+        
+        /**
+         * Less than condition.
+         * 
+         * @param value the value to compare
+         * @return this FieldCondition for chaining
+         */
+        public FieldCondition lt(Object value) {
+            if (deleteBuilder.filter == null) {
+                deleteBuilder.filter = new Filter(fieldName, Filter.Operator.LT, value);
+            } else {
+                deleteBuilder.filter = deleteBuilder.filter.and(new Filter(fieldName, Filter.Operator.LT, value));
+            }
+            return this;
+        }
+        
+        /**
+         * Less than or equal condition.
+         * 
+         * @param value the value to compare
+         * @return this FieldCondition for chaining
+         */
+        public FieldCondition lte(Object value) {
+            if (deleteBuilder.filter == null) {
+                deleteBuilder.filter = new Filter(fieldName, Filter.Operator.LTE, value);
+            } else {
+                deleteBuilder.filter = deleteBuilder.filter.and(new Filter(fieldName, Filter.Operator.LTE, value));
+            }
+            return this;
+        }
+        
+        /**
+         * Between condition (inclusive).
+         * 
+         * @param from lower bound
+         * @param to upper bound
+         * @return this FieldCondition for chaining
+         */
+        public FieldCondition between(Object from, Object to) {
+            if (deleteBuilder.filter == null) {
+                deleteBuilder.filter = new Filter(fieldName, Filter.Operator.BETWEEN, from, to);
+            } else {
+                deleteBuilder.filter = deleteBuilder.filter.and(new Filter(fieldName, Filter.Operator.BETWEEN, from, to));
+            }
+            return this;
+        }
+        
+        /**
+         * AND operator - starts condition on a new field.
+         * 
+         * @param fieldName the field name
+         * @return FieldCondition builder for the new field
+         */
+        public FieldCondition and(String fieldName) {
+            return new FieldCondition(fieldName, deleteBuilder);
+        }
+        
+        /**
+         * AND operator - continues building conditions on same field.
+         * 
+         * @return this FieldCondition for chaining
+         */
+        public FieldCondition and() {
             return this;
         }
     }
