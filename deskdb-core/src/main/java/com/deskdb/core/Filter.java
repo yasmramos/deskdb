@@ -79,13 +79,13 @@ public class Filter {
     public boolean matches(Map<String, Object> row) {
         // Si es un filtro lambda, evaluar el predicado
         if (lambdaPredicate != null) {
-            try {
-                Row rowObj = new Row(-1, row);
-                lambdaPredicate.accept(rowObj);
-                return true; // Si no lanza excepción, el filter pasa
-            } catch (Exception e) {
-                return false; // Si lanza excepción, el filter falla
-            }
+            Row rowObj = new Row(-1, row);
+            lambdaPredicate.accept(rowObj);
+            // Check if any condition failed using the hasFailed() method
+            // We need to inspect the Row's LambdaFieldCondition if it exists
+            // Since we can't directly access it, we use a different approach:
+            // Wrap the evaluation to catch failures via a flag
+            return evaluateLambdaPredicate(rowObj);
         }
         
         // Si es un filtro compuesto (AND/OR), evaluar hijos recursivamente
@@ -128,6 +128,34 @@ public class Filter {
     }
 
     public boolean apply(Row row) { return matches(row.getValues()); }
+    
+    /**
+     * Evaluates a lambda predicate by tracking failures in LambdaFieldCondition.
+     * The predicate is executed and we check if any condition failed.
+     */
+    @SuppressWarnings("unchecked")
+    private boolean evaluateLambdaPredicate(Row rowObj) {
+        try {
+            // Execute the predicate - it will modify the row's internal state
+            // We need to access the LambdaFieldCondition to check hasFailed()
+            // Since LambdaFieldCondition is an inner class of Row, we use reflection
+            // or we track failures differently
+            
+            // Alternative approach: Use a ThreadLocal to track failures
+            // But simpler: just check if the predicate threw an exception or set a failure flag
+            
+            // For now, use a simple approach: wrap in try-catch and use a failure holder
+            final boolean[] failed = {false};
+            
+            // Create a wrapper that tracks failures
+            Row.TrackingRow trackingRow = new Row.TrackingRow(rowObj);
+            lambdaPredicate.accept(trackingRow);
+            
+            return !trackingRow.hasFailed();
+        } catch (Exception e) {
+            return false;
+        }
+    }
     
     private boolean safeEquals(Object a, Object b) {
         if (a == null && b == null) return true;
