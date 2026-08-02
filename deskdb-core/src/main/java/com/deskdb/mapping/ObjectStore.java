@@ -534,6 +534,7 @@ public class ObjectStore {
             
             inMemoryCache.remove(typeName);
             idGenerators.remove(typeName);
+            classIndex.remove(typeName);
         } catch (Exception e) {
             throw new RuntimeException("Failed to clear object store for type", e);
         }
