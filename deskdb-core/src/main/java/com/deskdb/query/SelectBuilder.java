@@ -170,12 +170,15 @@ public class SelectBuilder {
     public List<Row> execute() throws Exception {
         List<Row> results;
         
+        // Verificar si hay filtros lambda - si los hay, usar full scan directamente
+        boolean hasLambdaFilter = filters.stream().anyMatch(f -> f.getLambdaPredicate() != null);
+        
         // Usar QueryOptimizer para ejecutar con índices cuando sea posible
         if (transaction != null) {
             // Para transacciones, usar el método select que ya tiene optimización interna
             results = transaction.select(tableName, filters);
         } else {
-            if (!filters.isEmpty()) {
+            if (!filters.isEmpty() && !hasLambdaFilter) {
                 Query query = new Query(table.getName(), filters, columns, limit, offset, orderByColumn, orderByAsc);
                 QueryOptimizer optimizer = new QueryOptimizer();
                 QueryPlan plan = optimizer.optimize(query, table);
@@ -196,6 +199,7 @@ public class SelectBuilder {
                     results = table.select(filters);
                 }
             } else {
+                // Sin filtros o con filtros lambda - usar full scan
                 results = table.select(filters);
             }
         }

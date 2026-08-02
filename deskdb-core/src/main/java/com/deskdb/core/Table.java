@@ -199,6 +199,16 @@ public class Table {
             return new ArrayList<>(data.values());
         }
 
+        // Check if any filter is a lambda predicate - if so, use full scan only
+        boolean hasLambdaFilter = filters.stream().anyMatch(f -> f.getLambdaPredicate() != null);
+        
+        if (hasLambdaFilter) {
+            // Lambda predicates require full scan as they cannot use indexes
+            return data.values().stream()
+                .filter(r -> matchesAllFilters(r, filters))
+                .collect(Collectors.toList());
+        }
+
         QueryOptimizer optimizer = new QueryOptimizer();
         Query query = new Query(name, filters, null, -1, 0, null, true);
         QueryPlan plan = optimizer.optimize(query, this);

@@ -127,7 +127,13 @@ public class Filter {
         }
     }
 
-    public boolean apply(Row row) { return matches(row.getValues()); }
+    public boolean apply(Row row) { 
+        // Si es filtro lambda, usar evaluateLambdaPredicate directamente con TrackingRow
+        if (lambdaPredicate != null) {
+            return evaluateLambdaPredicate(row);
+        }
+        return matches(row.getValues()); 
+    }
     
     /**
      * Evaluates a lambda predicate by tracking failures in LambdaFieldCondition.

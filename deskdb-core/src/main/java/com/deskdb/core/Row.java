@@ -226,7 +226,10 @@ public class Row {
             
             @Override
             public TrackingLambdaFieldCondition eq(Object value) {
-                TrackingRow.this.setFailed();
+                Object fieldValue = getFieldValue(fieldName);
+                if (value == null ? fieldValue != null : !value.equals(fieldValue)) {
+                    TrackingRow.this.setFailed();
+                }
                 return this;
             }
             
@@ -286,7 +289,12 @@ public class Row {
             
             @Override
             public TrackingLambdaFieldCondition and(String fieldName) {
-                return new TrackingLambdaFieldCondition(TrackingRow.this, fieldName, null);
+                TrackingLambdaFieldCondition newCond = new TrackingLambdaFieldCondition(TrackingRow.this, fieldName, null);
+                // Preserve failure state from parent condition
+                if (TrackingRow.this.hasFailed()) {
+                    TrackingRow.this.setFailed();
+                }
+                return newCond;
             }
             
             private Object getFieldValue(String fieldName) {
