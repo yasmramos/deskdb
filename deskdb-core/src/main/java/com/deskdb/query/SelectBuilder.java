@@ -7,7 +7,47 @@ import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.Collections;
+import java.util.function.Consumer;
 
+/**
+ * Builder for constructing and executing SELECT queries.
+ * <p>
+ * Supports column projection, filtering, ordering, pagination, and automatic object mapping.
+ * </p>
+ * 
+ * <h2>Usage Examples:</h2>
+ * 
+ * <h3>Select All Columns</h3>
+ * <pre>{@code
+ * List<Row> rows = db.table("users")
+ *   .select()
+ *   .where("age").gt(18)
+ *   .execute();
+ * }</pre>
+ * 
+ * <h3>Select Specific Columns (Projection)</h3>
+ * <pre>{@code
+ * List<Row> rows = db.table("users")
+ *   .select("name", "email")
+ *   .where("age").between(18, 65)
+ *   .orderBy("name")
+ *   .limit(100)
+ *   .execute();
+ * }</pre>
+ * 
+ * <h3>Select with Lambda Predicate</h3>
+ * <pre>{@code
+ * List<User> users = db.table("users")
+ *   .select()
+ *   .where(user -> user
+ *       .field("age").gt(18)
+ *       .and("status").eq("active"))
+ *   .execute(User.class);
+ * }</pre>
+ * 
+ * @see TableOperations#select(String...)
+ * @see TableOperations#selectAll()
+ */
 public class SelectBuilder {
     private final Table table;
     private final Transaction transaction;
@@ -44,6 +84,43 @@ public class SelectBuilder {
         for (String col : cols) {
             this.columns.add(col);
         }
+        return this;
+    }
+
+    /**
+     * Specifies columns to retrieve (projection).
+     * Alternative method name for columns().
+     * 
+     * @param cols column names to select
+     * @return this SelectBuilder for method chaining
+     */
+    public SelectBuilder select(String... cols) {
+        return columns(cols);
+    }
+
+    /**
+     * Adds a filter using a lambda predicate for fluent API.
+     * <p>
+     * Example:
+     * <pre>{@code
+     * db.table("users")
+     *   .select()
+     *   .where(user -> user
+     *       .field("age").gt(18)
+     *       .and("status").eq("active"))
+     *   .execute();
+     * }</pre>
+     * 
+     * The predicate is evaluated against each row during execution. If the predicate
+     * completes without throwing an exception, the row matches the filter.
+     * 
+     * @param predicate a function that evaluates conditions against a Row
+     * @return this SelectBuilder for method chaining
+     */
+    public SelectBuilder where(Consumer<com.deskdb.core.Row> predicate) {
+        // Create a special filter that evaluates the predicate against each row
+        Filter lambdaFilter = new Filter(predicate);
+        this.filters.add(lambdaFilter);
         return this;
     }
 
@@ -93,12 +170,15 @@ public class SelectBuilder {
     public List<Row> execute() throws Exception {
         List<Row> results;
         
+        // Verificar si hay filtros lambda - si los hay, usar full scan directamente
+        boolean hasLambdaFilter = filters.stream().anyMatch(f -> f.getLambdaPredicate() != null);
+        
         // Usar QueryOptimizer para ejecutar con índices cuando sea posible
         if (transaction != null) {
             // Para transacciones, usar el método select que ya tiene optimización interna
             results = transaction.select(tableName, filters);
         } else {
-            if (!filters.isEmpty()) {
+            if (!filters.isEmpty() && !hasLambdaFilter) {
                 Query query = new Query(table.getName(), filters, columns, limit, offset, orderByColumn, orderByAsc);
                 QueryOptimizer optimizer = new QueryOptimizer();
                 QueryPlan plan = optimizer.optimize(query, table);
@@ -119,6 +199,7 @@ public class SelectBuilder {
                     results = table.select(filters);
                 }
             } else {
+                // Sin filtros o con filtros lambda - usar full scan
                 results = table.select(filters);
             }
         }
@@ -210,9 +291,9 @@ public class SelectBuilder {
         for (Long id : rowIds) {
             Row row = table.getData().get(id);
             if (row != null) {
-                // Aplicar todos los filtros (incluyendo los no indexados)
+                // Aplicar todos los filtros del plan (incluyendo los no indexados)
                 boolean matches = true;
-                for (Filter f : filters) {
+                for (Filter f : plan.getFilters()) {
                     if (!f.apply(row)) {
                         matches = false;
                         break;
@@ -469,6 +550,195 @@ public class SelectBuilder {
         
         public SelectBuilder orderByDesc(String column) {
             return builder.orderByDesc(column);
+        }
+    }
+    
+    /**
+     * Builder for constructing filter conditions using lambda expressions.
+     * Provides a fluent API for complex WHERE clauses.
+     */
+    public static class WhereConditionBuilder {
+        private final SelectBuilder selectBuilder;
+        private Filter accumulatedFilter = null;
+        
+        public WhereConditionBuilder(SelectBuilder selectBuilder) {
+            this.selectBuilder = selectBuilder;
+        }
+        
+        /**
+         * Starts a condition on the specified field.
+         * 
+         * @param fieldName the field name
+         * @return FieldCondition builder
+         */
+        public FieldCondition field(String fieldName) {
+            return new FieldCondition(fieldName, this);
+        }
+        
+        /**
+         * Applies the accumulated filter to the select builder.
+         * Called automatically when the lambda completes.
+         */
+        void applyFilter() {
+            if (accumulatedFilter != null) {
+                selectBuilder.filters.add(accumulatedFilter);
+            }
+        }
+        
+        /**
+         * Adds or combines a filter with the accumulated filter using AND.
+         */
+        void addFilter(Filter newFilter) {
+            if (accumulatedFilter == null) {
+                accumulatedFilter = newFilter;
+            } else {
+                accumulatedFilter = accumulatedFilter.and(newFilter);
+            }
+        }
+    }
+    
+    /**
+     * Builder for field-specific conditions.
+     * Combines multiple conditions with AND operator.
+     * All filters in the list are automatically combined with AND during execution.
+     */
+    public static class FieldCondition {
+        protected final String fieldName;
+        private final WhereConditionBuilder whereBuilder;
+        
+        public FieldCondition(String fieldName, WhereConditionBuilder whereBuilder) {
+            this.fieldName = fieldName;
+            this.whereBuilder = whereBuilder;
+        }
+        
+        protected String getFieldName() {
+            return fieldName;
+        }
+        
+        protected WhereConditionBuilder getWhereBuilder() {
+            return whereBuilder;
+        }
+        
+        /**
+         * Equals condition.
+         * 
+         * @param value the value to compare
+         * @return this FieldCondition for chaining
+         */
+        public FieldCondition eq(Object value) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.EQ, value);
+            addFilterWithAndLogic(newFilter);
+            return this;
+        }
+        
+        /**
+         * Not equals condition.
+         * 
+         * @param value the value to compare
+         * @return this FieldCondition for chaining
+         */
+        public FieldCondition ne(Object value) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.NE, value);
+            addFilterWithAndLogic(newFilter);
+            return this;
+        }
+        
+        /**
+         * Greater than condition.
+         * 
+         * @param value the value to compare
+         * @return this FieldCondition for chaining
+         */
+        public FieldCondition gt(Object value) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.GT, value);
+            addFilterWithAndLogic(newFilter);
+            return this;
+        }
+        
+        /**
+         * Greater than or equal condition.
+         * 
+         * @param value the value to compare
+         * @return this FieldCondition for chaining
+         */
+        public FieldCondition gte(Object value) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.GTE, value);
+            addFilterWithAndLogic(newFilter);
+            return this;
+        }
+        
+        /**
+         * Less than condition.
+         * 
+         * @param value the value to compare
+         * @return this FieldCondition for chaining
+         */
+        public FieldCondition lt(Object value) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.LT, value);
+            addFilterWithAndLogic(newFilter);
+            return this;
+        }
+        
+        /**
+         * Less than or equal condition.
+         * 
+         * @param value the value to compare
+         * @return this FieldCondition for chaining
+         */
+        public FieldCondition lte(Object value) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.LTE, value);
+            addFilterWithAndLogic(newFilter);
+            return this;
+        }
+        
+        /**
+         * Between condition (inclusive).
+         * 
+         * @param from start value
+         * @param to end value
+         * @return this FieldCondition for chaining
+         */
+        public FieldCondition between(Object from, Object to) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.BETWEEN, from, to);
+            addFilterWithAndLogic(newFilter);
+            return this;
+        }
+        
+        /**
+         * AND operator - continues building conditions on same field.
+         * 
+         * @return this FieldCondition for chaining
+         */
+        public FieldCondition and() {
+            return this;
+        }
+        
+        /**
+         * AND operator - starts condition on a new field.
+         * 
+         * @param fieldName the field name
+         * @return FieldCondition builder for the new field
+         */
+        public FieldCondition and(String fieldName) {
+            return new FieldCondition(fieldName, whereBuilder);
+        }
+        
+        /**
+         * OR operator - not yet implemented, reserved for future use.
+         * 
+         * @param fieldName the field name
+         * @return FieldCondition builder for the new field
+         */
+        public FieldCondition or(String fieldName) {
+            // TODO: Implement OR logic
+            return new FieldCondition(fieldName, whereBuilder);
+        }
+        
+        /**
+         * Helper method to combine filters with AND logic.
+         */
+        private void addFilterWithAndLogic(Filter newFilter) {
+            whereBuilder.addFilter(newFilter);
         }
     }
 }

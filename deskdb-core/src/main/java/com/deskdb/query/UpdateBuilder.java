@@ -7,6 +7,7 @@ import com.deskdb.core.Transaction;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /**
  * Optimized UPDATE builder with direct execution path.
@@ -53,6 +54,28 @@ public class UpdateBuilder {
     
     public UpdateBuilder set(Map<String, Object> values) {
         setValues.putAll(values);
+        return this;
+    }
+
+    /**
+     * Adds a filter using a lambda predicate for fluent API.
+     * <p>
+     * Example:
+     * <pre>{@code
+     * db.table("users")
+     *   .update()
+     *   .set("status", "premium")
+     *   .where(user -> user
+     *       .field("age").gt(40))
+     *   .execute();
+     * }</pre>
+     * 
+     * @param predicate a function that builds filter conditions
+     * @return this UpdateBuilder for method chaining
+     */
+    public UpdateBuilder where(Consumer<WhereConditionBuilder> predicate) {
+        WhereConditionBuilder builder = new WhereConditionBuilder(this);
+        predicate.accept(builder);
         return this;
     }
 
@@ -159,6 +182,207 @@ public class UpdateBuilder {
         public UpdateBuilder isEqualTo(Object value) {
             parent.filter = new Filter(column, Filter.Operator.EQ, value);
             return parent;
+        }
+        
+        public WhereCondition gt(Object value) {
+            parent.filter = new Filter(column, Filter.Operator.GT, value);
+            return this;
+        }
+        
+        public WhereCondition gte(Object value) {
+            parent.filter = new Filter(column, Filter.Operator.GTE, value);
+            return this;
+        }
+        
+        public WhereCondition lt(Object value) {
+            parent.filter = new Filter(column, Filter.Operator.LT, value);
+            return this;
+        }
+        
+        public WhereCondition lte(Object value) {
+            parent.filter = new Filter(column, Filter.Operator.LTE, value);
+            return this;
+        }
+        
+        public WhereCondition ne(Object value) {
+            parent.filter = new Filter(column, Filter.Operator.NE, value);
+            return this;
+        }
+        
+        public WhereCondition between(Object from, Object to) {
+            parent.filter = new Filter(column, Filter.Operator.BETWEEN, from, to);
+            return this;
+        }
+        
+        public WhereCondition and(String column) {
+            return new WhereCondition(column, parent);
+        }
+    }
+    
+    /**
+     * Builder for lambda-based WHERE conditions.
+     */
+    public static class WhereConditionBuilder {
+        private final UpdateBuilder updateBuilder;
+        
+        public WhereConditionBuilder(UpdateBuilder updateBuilder) {
+            this.updateBuilder = updateBuilder;
+        }
+        
+        /**
+         * Starts a condition on the specified field.
+         * 
+         * @param fieldName the field name
+         * @return FieldCondition builder
+         */
+        public FieldCondition field(String fieldName) {
+            return new FieldCondition(fieldName, updateBuilder);
+        }
+    }
+    
+    /**
+     * Builder for field-specific conditions in lambda expressions.
+     */
+    public static class FieldCondition {
+        private final String fieldName;
+        private final UpdateBuilder updateBuilder;
+        
+        public FieldCondition(String fieldName, UpdateBuilder updateBuilder) {
+            this.fieldName = fieldName;
+            this.updateBuilder = updateBuilder;
+        }
+        
+        /**
+         * Equals condition.
+         * 
+         * @param value the value to compare
+         * @return this FieldCondition for chaining
+         */
+        public FieldCondition eq(Object value) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.EQ, value);
+            if (updateBuilder.filter == null) {
+                updateBuilder.filter = newFilter;
+            } else {
+                updateBuilder.filter = updateBuilder.filter.and(newFilter);
+            }
+            return this;
+        }
+        
+        /**
+         * Not equals condition.
+         * 
+         * @param value the value to compare
+         * @return this FieldCondition for chaining
+         */
+        public FieldCondition ne(Object value) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.NE, value);
+            if (updateBuilder.filter == null) {
+                updateBuilder.filter = newFilter;
+            } else {
+                updateBuilder.filter = updateBuilder.filter.and(newFilter);
+            }
+            return this;
+        }
+        
+        /**
+         * Greater than condition.
+         * 
+         * @param value the value to compare
+         * @return this FieldCondition for chaining
+         */
+        public FieldCondition gt(Object value) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.GT, value);
+            if (updateBuilder.filter == null) {
+                updateBuilder.filter = newFilter;
+            } else {
+                updateBuilder.filter = updateBuilder.filter.and(newFilter);
+            }
+            return this;
+        }
+        
+        /**
+         * Greater than or equal condition.
+         * 
+         * @param value the value to compare
+         * @return this FieldCondition for chaining
+         */
+        public FieldCondition gte(Object value) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.GTE, value);
+            if (updateBuilder.filter == null) {
+                updateBuilder.filter = newFilter;
+            } else {
+                updateBuilder.filter = updateBuilder.filter.and(newFilter);
+            }
+            return this;
+        }
+        
+        /**
+         * Less than condition.
+         * 
+         * @param value the value to compare
+         * @return this FieldCondition for chaining
+         */
+        public FieldCondition lt(Object value) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.LT, value);
+            if (updateBuilder.filter == null) {
+                updateBuilder.filter = newFilter;
+            } else {
+                updateBuilder.filter = updateBuilder.filter.and(newFilter);
+            }
+            return this;
+        }
+        
+        /**
+         * Less than or equal condition.
+         * 
+         * @param value the value to compare
+         * @return this FieldCondition for chaining
+         */
+        public FieldCondition lte(Object value) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.LTE, value);
+            if (updateBuilder.filter == null) {
+                updateBuilder.filter = newFilter;
+            } else {
+                updateBuilder.filter = updateBuilder.filter.and(newFilter);
+            }
+            return this;
+        }
+        
+        /**
+         * Between condition (inclusive).
+         * 
+         * @param from lower bound
+         * @param to upper bound
+         * @return this FieldCondition for chaining
+         */
+        public FieldCondition between(Object from, Object to) {
+            Filter newFilter = new Filter(fieldName, Filter.Operator.BETWEEN, from, to);
+            if (updateBuilder.filter == null) {
+                updateBuilder.filter = newFilter;
+            } else {
+                updateBuilder.filter = updateBuilder.filter.and(newFilter);
+            }
+            return this;
+        }
+        
+        /**
+         * AND operator - starts condition on a new field.
+         * The new field continues building on the existing filter.
+         * 
+         * @param fieldName the field name
+         * @return FieldCondition builder for the new field
+         */
+        public FieldCondition and(String fieldName) {
+            return new FieldCondition(fieldName, updateBuilder);
+        }
+        
+        /**
+         * AND operator - continues building conditions on same field.
+         * 
+         * @return this FieldCondition for chaining
+         */
+        public FieldCondition and() {
+            return this;
         }
     }
 }

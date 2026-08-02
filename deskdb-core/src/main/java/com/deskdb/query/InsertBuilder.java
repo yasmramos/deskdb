@@ -240,8 +240,8 @@ public class InsertBuilder {
      * @throws IllegalStateException if neither table nor transaction is available
      */
     public void execute(Transaction tx) throws Exception {
-        // Auto-add pending row if values exist
-        if (batchValues.isEmpty() && !currentValues.isEmpty()) {
+        // Auto-add pending row if values exist (even if batch already has rows)
+        if (!currentValues.isEmpty()) {
             addRow();
         }
         
