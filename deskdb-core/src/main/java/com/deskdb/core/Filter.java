@@ -3,6 +3,7 @@ package com.deskdb.core;
 import java.util.Map;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.function.Consumer;
 
 public class Filter {
     private String column;
@@ -11,7 +12,8 @@ public class Filter {
     private Object value2; // Para BETWEEN (valor superior)
     private LogicalOperator logicalOp; // Para combinar filtros (AND/OR)
     private List<Filter> children; // Para condiciones anidadas
-
+    private Consumer<Row> lambdaPredicate; // Para filtros basados en lambda
+    
     public enum Operator { EQ, GT, LT, GTE, LTE, NEQ, NE, BETWEEN, ALL }
     public enum LogicalOperator { AND, OR, NONE }
 
@@ -43,6 +45,15 @@ public class Filter {
             this.children.add(child);
         }
     }
+    
+    // Constructor para filtro lambda
+    public Filter(Consumer<Row> predicate) {
+        this.column = null;
+        this.operator = Operator.ALL;
+        this.logicalOp = LogicalOperator.NONE;
+        this.children = new ArrayList<>();
+        this.lambdaPredicate = predicate;
+    }
 
     public String getColumn() { return column; }
     public Operator getOperator() { return operator; }
@@ -53,6 +64,7 @@ public class Filter {
     public void setValue2(Object value2) { this.value2 = value2; }
     public LogicalOperator getLogicalOp() { return logicalOp; }
     public List<Filter> getChildren() { return children; }
+    public Consumer<Row> getLambdaPredicate() { return lambdaPredicate; }
     
     // Métodos para construir condiciones compuestas
     public Filter and(Filter other) {
@@ -65,6 +77,17 @@ public class Filter {
 
     @SuppressWarnings("unchecked")
     public boolean matches(Map<String, Object> row) {
+        // Si es un filtro lambda, evaluar el predicado
+        if (lambdaPredicate != null) {
+            try {
+                Row rowObj = new Row(-1, row);
+                lambdaPredicate.accept(rowObj);
+                return true; // Si no lanza excepción, el filter pasa
+            } catch (Exception e) {
+                return false; // Si lanza excepción, el filter falla
+            }
+        }
+        
         // Si es un filtro compuesto (AND/OR), evaluar hijos recursivamente
         if (logicalOp != LogicalOperator.NONE && !children.isEmpty()) {
             switch (logicalOp) {

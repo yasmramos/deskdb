@@ -111,13 +111,16 @@ public class SelectBuilder {
      *   .execute();
      * }</pre>
      * 
-     * @param predicate a function that builds filter conditions
+     * The predicate is evaluated against each row during execution. If the predicate
+     * completes without throwing an exception, the row matches the filter.
+     * 
+     * @param predicate a function that evaluates conditions against a Row
      * @return this SelectBuilder for method chaining
      */
-    public SelectBuilder where(Consumer<WhereConditionBuilder> predicate) {
-        WhereConditionBuilder builder = new WhereConditionBuilder(this);
-        predicate.accept(builder);
-        builder.applyFilter();
+    public SelectBuilder where(Consumer<com.deskdb.core.Row> predicate) {
+        // Create a special filter that evaluates the predicate against each row
+        Filter lambdaFilter = new Filter(predicate);
+        this.filters.add(lambdaFilter);
         return this;
     }
 
@@ -284,9 +287,9 @@ public class SelectBuilder {
         for (Long id : rowIds) {
             Row row = table.getData().get(id);
             if (row != null) {
-                // Aplicar todos los filtros (incluyendo los no indexados)
+                // Aplicar todos los filtros del plan (incluyendo los no indexados)
                 boolean matches = true;
-                for (Filter f : filters) {
+                for (Filter f : plan.getFilters()) {
                     if (!f.apply(row)) {
                         matches = false;
                         break;
@@ -596,12 +599,20 @@ public class SelectBuilder {
      * All filters in the list are automatically combined with AND during execution.
      */
     public static class FieldCondition {
-        private final String fieldName;
+        protected final String fieldName;
         private final WhereConditionBuilder whereBuilder;
         
         public FieldCondition(String fieldName, WhereConditionBuilder whereBuilder) {
             this.fieldName = fieldName;
             this.whereBuilder = whereBuilder;
+        }
+        
+        protected String getFieldName() {
+            return fieldName;
+        }
+        
+        protected WhereConditionBuilder getWhereBuilder() {
+            return whereBuilder;
         }
         
         /**
