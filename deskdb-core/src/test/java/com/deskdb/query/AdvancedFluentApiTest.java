@@ -30,9 +30,14 @@ public class AdvancedFluentApiTest {
         // Initialize database using public factory method
         db = DeskDB.open(Path.of(TEST_DIR, "advanced-fluent-db"));
         
-        // Create test table using existing API from tests
-        // Using TableSchema approach compatible with current API
-        Table usersTable = db.createTable("users");
+        // Create test table with explicit columns to enable indexes
+        Table usersTable = db.createTable("users",
+            new Column("id", DataType.INT).primaryKey(),
+            new Column("name", DataType.STRING),
+            new Column("age", DataType.INT),
+            new Column("email", DataType.STRING),
+            new Column("status", DataType.STRING)
+        );
         
         // Insert test data
         db.table("users")

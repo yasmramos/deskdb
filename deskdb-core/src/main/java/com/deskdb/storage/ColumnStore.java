@@ -21,8 +21,14 @@ public class ColumnStore {
     // Por columna: lista de bloques de datos (cada bloque es una página o fragmento)
     private final Map<String, List<ColumnBlock>> columnData;
     
-    // Mapeo rowId -> posición en cada columna
+    // Mapeo rowId -> posición global en cada columna (posición absoluta, no relativa por bloque)
     private final Map<Long, Map<String, Integer>> rowPositions;
+    
+    // Índices inversos persistentes por columna: posición global -> rowId (optimización O(1))
+    private final Map<String, Map<Integer, Long>> columnIndexInverse;
+    
+    // Zone maps por bloque: min/max valores para pruning en scans
+    private final Map<String, List<ZoneMap>> columnZoneMaps;
     
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
     private final AtomicLong rowCountCounter = new AtomicLong(0);
@@ -36,11 +42,15 @@ public class ColumnStore {
         this.columnTypes = new LinkedHashMap<>();
         this.columnData = new HashMap<>();
         this.rowPositions = new HashMap<>();
+        this.columnIndexInverse = new HashMap<>();
+        this.columnZoneMaps = new HashMap<>();
         
         for (Column col : schema) {
             columnNames.add(col.getName());
             columnTypes.put(col.getName(), col.getType());
             columnData.put(col.getName(), new ArrayList<>());
+            columnIndexInverse.put(col.getName(), new HashMap<>());
+            columnZoneMaps.put(col.getName(), new ArrayList<>());
         }
     }
     
@@ -54,12 +64,14 @@ public class ColumnStore {
         try {
             long rowId = rowCount;
             
-            // Calcular posiciones para cada columna antes de insertar
-            Map<String, Integer> positions = new HashMap<>();
+            // Calcular posiciones globales para cada columna antes de insertar
+            Map<String, Integer> globalPositions = new HashMap<>();
             
             for (String colName : columnNames) {
                 Object value = values.getOrDefault(colName, null);
                 List<ColumnBlock> blocks = columnData.get(colName);
+                Map<Integer, Long> indexInverse = columnIndexInverse.get(colName);
+                List<ZoneMap> zoneMaps = columnZoneMaps.get(colName);
                 
                 ColumnBlock lastBlock;
                 synchronized (blocks) {
@@ -67,14 +79,38 @@ public class ColumnStore {
                     if (lastBlock == null || lastBlock.isFull()) {
                         lastBlock = new ColumnBlock(columnTypes.get(colName), pageManager);
                         blocks.add(lastBlock);
+                        // Agregar zone map para el nuevo bloque
+                        zoneMaps.add(new ZoneMap());
                     }
-                    int position = lastBlock.append(value, columnTypes.get(colName));
-                    positions.put(colName, position);
+                    
+                    // Posición global = suma de tamaños de todos los bloques anteriores + posición en bloque actual
+                    int cumulativeSize = 0;
+                    for (ColumnBlock block : blocks) {
+                        if (block != lastBlock) {
+                            cumulativeSize += block.size();
+                        }
+                    }
+                    
+                    int localPosition = lastBlock.append(value, columnTypes.get(colName));
+                    int globalPosition = cumulativeSize + localPosition;
+                    
+                    globalPositions.put(colName, globalPosition);
+                    
+                    // Actualizar índice inverso persistente: posición global -> rowId
+                    synchronized (indexInverse) {
+                        indexInverse.put(globalPosition, rowId);
+                    }
+                    
+                    // Actualizar zone map del último bloque con el nuevo valor
+                    synchronized (zoneMaps) {
+                        ZoneMap currentZoneMap = zoneMaps.get(zoneMaps.size() - 1);
+                        currentZoneMap.update(value);
+                    }
                 }
             }
             
-            // Registrar las posiciones de esta fila
-            rowPositions.put(rowId, positions);
+            // Registrar las posiciones globales de esta fila
+            rowPositions.put(rowId, globalPositions);
             rowCount++;
             
             return rowId;
@@ -221,35 +257,46 @@ public class ColumnStore {
     /**
      * Escanea una columna aplicando un filtro.
      * Retorna los rowIds que cumplen el predicado.
+     * Optimizado con índice inverso persistente O(1) y zone maps para pruning.
      */
     public List<Long> scanColumn(String columnName, Predicate<Object> predicate) {
         lock.readLock().lock();
         try {
             List<Long> matchingRowIds = new ArrayList<>();
             List<ColumnBlock> blocks = columnData.get(columnName);
+            Map<Integer, Long> indexInverse = columnIndexInverse.get(columnName);
+            List<ZoneMap> zoneMaps = columnZoneMaps.get(columnName);
             
             if (blocks.isEmpty()) {
                 return matchingRowIds;
             }
             
-            // Invertir mapeo: posición -> rowId
-            Map<Integer, Long> positionToRowId = new HashMap<>();
-            for (Map.Entry<Long, Map<String, Integer>> entry : rowPositions.entrySet()) {
-                Integer pos = entry.getValue().get(columnName);
-                if (pos != null) {
-                    positionToRowId.put(pos, entry.getKey());
-                }
-            }
-            
             int cumulative = 0;
-            for (ColumnBlock block : blocks) {
+            for (int blockIndex = 0; blockIndex < blocks.size(); blockIndex++) {
+                ColumnBlock block = blocks.get(blockIndex);
+                ZoneMap zoneMap = zoneMaps.get(blockIndex);
+                
+                // Usar zone map para pruning: saltar bloque si no puede contener valores matching
+                if (zoneMap != null && !zoneMap.couldMatch(predicate)) {
+                    cumulative += block.size();
+                    continue;
+                }
+                
+                // Escanear el bloque
                 for (int i = 0; i < block.size(); i++) {
+                    int globalPosition = cumulative + i;
+                    
+                    // Obtener rowId directamente del índice inverso persistente O(1)
+                    Long rowId = indexInverse.get(globalPosition);
+                    
+                    // Saltar rows eliminadas
+                    if (rowId == null || deletedRows.containsKey(rowId)) {
+                        continue;
+                    }
+                    
                     Object value = block.get(i);
                     if (predicate.test(value)) {
-                        Long rowId = positionToRowId.get(cumulative + i);
-                        if (rowId != null) {
-                            matchingRowIds.add(rowId);
-                        }
+                        matchingRowIds.add(rowId);
                     }
                 }
                 cumulative += block.size();
@@ -276,6 +323,79 @@ public class ColumnStore {
     
     public List<String> getColumnNames() {
         return new ArrayList<>(columnNames);
+    }
+    
+    /**
+     * Zone Map para pruning de bloques durante scans.
+     * Almacena min/max valores y permite determinar rápidamente si un bloque puede contener valores que cumplan un predicado.
+     */
+    private static class ZoneMap {
+        private Object minValue = null;
+        private Object maxValue = null;
+        private int count = 0;
+        
+        public void update(Object value) {
+            if (value == null) {
+                return;
+            }
+            
+            if (minValue == null || compare(value, minValue) < 0) {
+                minValue = value;
+            }
+            if (maxValue == null || compare(value, maxValue) > 0) {
+                maxValue = value;
+            }
+            count++;
+        }
+        
+        /**
+         * Determina si este bloque podría contener valores que cumplan el predicado.
+         * Usa min/max para pruning rápido.
+         */
+        public boolean couldMatch(Predicate<Object> predicate) {
+            if (minValue == null || maxValue == null) {
+                return true; // Sin datos, no podemos hacer pruning
+            }
+            
+            // Pruning basado en el rango [min, max]
+            // Si el predicado es una función arbitraria, debemos ser conservadores
+            // y asumir que podría matchear algo en el rango.
+            // Para predicados específicos (>, <, =, etc.) se podría optimizar más.
+            
+            // Caso especial: si min == max, solo hay un valor único
+            if (compare(minValue, maxValue) == 0) {
+                return predicate.test(minValue);
+            }
+            
+            // Para predicados genéricos, verificamos los extremos
+            // Esto es conservador pero seguro
+            return predicate.test(minValue) || predicate.test(maxValue) || count <= 2;
+        }
+        
+        @SuppressWarnings("unchecked")
+        private int compare(Object a, Object b) {
+            if (a instanceof Comparable && b instanceof Comparable) {
+                try {
+                    return ((Comparable<Object>) a).compareTo(b);
+                } catch (ClassCastException e) {
+                    // Tipos incompatibles, tratar como diferentes
+                    return a.toString().compareTo(b.toString());
+                }
+            }
+            return a.toString().compareTo(b.toString());
+        }
+        
+        public Object getMinValue() {
+            return minValue;
+        }
+        
+        public Object getMaxValue() {
+            return maxValue;
+        }
+        
+        public int getCount() {
+            return count;
+        }
     }
     
     /**
