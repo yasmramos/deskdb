@@ -11,30 +11,64 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.LinkedHashMap;
+import java.util.Collections;
 
 /**
- * Gestor de páginas con cache LRU y acceso concurrente.
- * Soporta multi-hilo mediante locks granulares por página.
+ * Gestor de páginas con cache LRU verdadero y acceso concurrente optimizado.
+ * Soporta multi-hilo mediante lock striping para mayor paralelismo.
  * Incluye Free List para reutilización de páginas eliminadas.
+ * 
+ * OPTIMIZACIONES IMPLEMENTADAS:
+ * - LRU Cache real con LinkedHashMap (access-order)
+ * - Lock Striping para concurrencia mejorada
+ * - Flush asíncrono batcheado
  */
 public class PageManager {
     private final FileChannel channel;
+    
+    // LRU Cache verdadero con LinkedHashMap (access-order = true)
     private final Map<Long, Page> pageCache;
-    private final ReentrantReadWriteLock cacheLock = new ReentrantReadWriteLock();
+    private final Object cacheLock = new Object();
+    
+    // Lock striping para mayor concurrencia (16 stripes)
+    private static final int NUM_STRIPES = 16;
+    private final ReentrantReadWriteLock[] stripeLocks;
+    
     private final ExecutorService flushExecutor;
+    private static final int DEFAULT_MAX_CACHE_SIZE = 2048;
     private final int maxCacheSize;
     
     // Free List: cola de páginas libres para reutilización
     private final Queue<Long> freePageList;
     private final Object freeListLock = new Object();
     
+    // Estadísticas para monitoreo
+    private long cacheHits = 0;
+    private long cacheMisses = 0;
+    
+    @SuppressWarnings("unchecked")
     public PageManager(Path filePath) throws IOException {
         this.channel = FileChannel.open(filePath, 
             StandardOpenOption.CREATE, 
             StandardOpenOption.READ, 
             StandardOpenOption.WRITE);
-        this.pageCache = new ConcurrentHashMap<>();
-        this.maxCacheSize = 1000; // Configurable
+        
+        // LRU Cache verdadero con access-order
+        this.maxCacheSize = DEFAULT_MAX_CACHE_SIZE;
+        this.pageCache = Collections.synchronizedMap(new LinkedHashMap<Long, Page>(maxCacheSize, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<Long, Page> eldest) {
+                return size() > maxCacheSize;
+            }
+        });
+        
+        // Inicializar lock striping
+        this.stripeLocks = new ReentrantReadWriteLock[NUM_STRIPES];
+        for (int i = 0; i < NUM_STRIPES; i++) {
+            stripeLocks[i] = new ReentrantReadWriteLock();
+        }
+        
         this.freePageList = new ConcurrentLinkedQueue<>();
         this.flushExecutor = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "PageFlusher");
@@ -66,42 +100,54 @@ public class PageManager {
     
     /**
      * Obtiene una página por número, cargándola a cache si es necesario.
-     * Thread-safe: múltiples hilos pueden leer la misma página simultáneamente.
+     * Thread-safe: usa lock striping para mayor concurrencia.
+     * LRU automático gracias a LinkedHashMap con access-order.
      */
     public Page getPage(long pageNumber) throws IOException {
-        // Intento rápido de lectura desde cache (lock compartido)
-        cacheLock.readLock().lock();
-        try {
+        // Intento rápido de lectura desde cache (LRU automático)
+        synchronized (cacheLock) {
             Page cached = pageCache.get(pageNumber);
             if (cached != null) {
+                cacheHits++;
                 return cached;
             }
-        } finally {
-            cacheLock.readLock().unlock();
         }
         
-        // Cache miss: cargar página (lock exclusivo)
-        cacheLock.writeLock().lock();
+        cacheMisses++;
+        
+        // Cache miss: cargar página con lock de stripe específico
+        int stripeIndex = getStripeIndex(pageNumber);
+        ReentrantReadWriteLock stripeLock = stripeLocks[stripeIndex];
+        
+        stripeLock.writeLock().lock();
         try {
-            // Double-check después de adquirir lock exclusivo
-            Page cached = pageCache.get(pageNumber);
-            if (cached != null) {
-                return cached;
+            // Double-check después de adquirir lock
+            synchronized (cacheLock) {
+                Page cached = pageCache.get(pageNumber);
+                if (cached != null) {
+                    return cached;
+                }
             }
             
             // Crear nueva página
             Page page = new Page(channel, pageNumber);
             
-            // Evitar crecimiento ilimitado del cache
-            if (pageCache.size() >= maxCacheSize) {
-                evictOldestPage();
+            // Agregar al cache (LRU automático se encarga de evict)
+            synchronized (cacheLock) {
+                pageCache.put(pageNumber, page);
             }
             
-            pageCache.put(pageNumber, page);
             return page;
         } finally {
-            cacheLock.writeLock().unlock();
+            stripeLock.writeLock().unlock();
         }
+    }
+    
+    /**
+     * Calcula el índice de stripe para un número de página dado.
+     */
+    private int getStripeIndex(long pageNumber) {
+        return (int)(Math.abs(pageNumber) % NUM_STRIPES);
     }
     
     /**
@@ -179,17 +225,11 @@ public class PageManager {
     
     /**
      * Removes the least recently used page from the cache.
+     * No longer needed - LinkedHashMap with access-order handles LRU automatically.
      */
     private void evictOldestPage() {
-        // Simple implementation: remove first page from map
-        // In production, use LinkedHashMap with access-order=true
-        if (!pageCache.isEmpty()) {
-            Long oldestKey = pageCache.keySet().iterator().next();
-            Page page = pageCache.remove(oldestKey);
-            if (page != null) {
-                page.flush(); // Ensure persistence before removing
-            }
-        }
+        // Automatic eviction via removeEldestEntry in LinkedHashMap
+        // This method kept for compatibility but no longer does anything
     }
     
     /**
@@ -200,15 +240,22 @@ public class PageManager {
     }
     
     /**
+     * Obtiene el ratio de hits del cache (0.0 a 1.0).
+     */
+    public double getCacheHitRatio() {
+        long total = cacheHits + cacheMisses;
+        return total == 0 ? 0.0 : (double)cacheHits / total;
+    }
+    
+    /**
      * Limpia el cache forzando recarga desde disco.
      */
     public void clearCache() {
-        cacheLock.writeLock().lock();
-        try {
+        synchronized (cacheLock) {
             flushAll();
             pageCache.clear();
-        } finally {
-            cacheLock.writeLock().unlock();
+            cacheHits = 0;
+            cacheMisses = 0;
         }
     }
     
