@@ -2,6 +2,11 @@ package com.deskdb.storage;
 
 import com.deskdb.core.DataType;
 import com.deskdb.core.Column;
+import com.deskdb.core.storage.compression.ColumnCompressor;
+import com.deskdb.core.storage.compression.CompressionUtils;
+import com.deskdb.core.storage.compression.RLECompressor;
+import com.deskdb.core.storage.compression.DeltaCompressor;
+import com.deskdb.core.storage.compression.NoOpCompressor;
 
 import java.nio.ByteBuffer;
 import java.util.*;
@@ -33,11 +38,16 @@ public class ColumnStore {
     // Offsets acumulados por columna para búsqueda binaria O(log n): [offsetBloque0, offsetBloque1, ...]
     private final Map<String, int[]> cumulativeOffsets;
     
+    // Compresión por columna: compresor activo y datos comprimidos
+    private final Map<String, ColumnCompressor> columnCompressors;
+    private final Map<String, byte[]> compressedData;
+    
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
     private final AtomicLong rowCountCounter = new AtomicLong(0);
     private int rowCount = 0;
     private final Map<Long, Boolean> deletedRows = Collections.synchronizedMap(new HashMap<>());
     private static final int COMPACTION_THRESHOLD = 10000; // Compactar cada 10k deletes
+    private static final int COMPRESSION_SAMPLE_SIZE = 1000; // Muestrear cada 1000 filas para compresión
     
     public ColumnStore(String tableName, List<Column> schema, PageManager pageManager) {
         this.tableName = tableName;
@@ -49,6 +59,8 @@ public class ColumnStore {
         this.columnIndexInverse = new HashMap<>();
         this.columnZoneMaps = new HashMap<>();
         this.cumulativeOffsets = new HashMap<>();
+        this.columnCompressors = new HashMap<>();
+        this.compressedData = new HashMap<>();
         
         for (Column col : schema) {
             columnNames.add(col.getName());
@@ -57,6 +69,9 @@ public class ColumnStore {
             columnIndexInverse.put(col.getName(), new HashMap<>());
             columnZoneMaps.put(col.getName(), new ArrayList<>());
             cumulativeOffsets.put(col.getName(), new int[0]);
+            // Inicializar con compresor NoOp por defecto
+            columnCompressors.put(col.getName(), new NoOpCompressor());
+            compressedData.put(col.getName(), new byte[0]);
         }
     }
     
@@ -137,6 +152,11 @@ public class ColumnStore {
                 cumulativeOffsets.put(colName, newOffsets);
             }
             
+            // Aplicar compresión adaptativa cada COMPRESSION_SAMPLE_SIZE filas
+            if (rowCount % COMPRESSION_SAMPLE_SIZE == 0 && rowCount > 0) {
+                applyAdaptiveCompression();
+            }
+            
             // Verificar si es necesario compactar
             if (deletedRows.size() > COMPACTION_THRESHOLD) {
                 compactDeletedRows();
@@ -145,6 +165,104 @@ public class ColumnStore {
             return rowId;
         } finally {
             lock.writeLock().unlock();
+        }
+    }
+    
+    /**
+     * Aplica compresión adaptativa a todas las columnas basado en patrones de datos.
+     * Selecciona automáticamente el mejor algoritmo (RLE, Delta, o None) para cada columna.
+     */
+    private void applyAdaptiveCompression() {
+        for (String colName : columnNames) {
+            try {
+                // Serializar datos de la columna para análisis
+                List<ColumnBlock> blocks = columnData.get(colName);
+                DataType dataType = columnTypes.get(colName);
+                
+                // Muestrear datos para determinar patrón de compresión óptimo
+                ByteBuffer sampleBuffer = ByteBuffer.allocate(COMPRESSION_SAMPLE_SIZE * 20);
+                int sampled = 0;
+                
+                synchronized (blocks) {
+                    for (ColumnBlock block : blocks) {
+                        if (sampled >= COMPRESSION_SAMPLE_SIZE) break;
+                        
+                        int blockSize = Math.min(block.size(), COMPRESSION_SAMPLE_SIZE - sampled);
+                        for (int i = 0; i < blockSize; i++) {
+                            Object value = block.get(i);
+                            if (value != null) {
+                                PrimitiveSerializer.write(sampleBuffer, value, dataType);
+                                sampled++;
+                            }
+                        }
+                    }
+                }
+                
+                if (sampled > 10) {
+                    byte[] sampleData = Arrays.copyOf(sampleBuffer.array(), sampleBuffer.position());
+                    
+                    // Seleccionar mejor compresor basado en patrones de datos
+                    ColumnCompressor bestCompressor = CompressionUtils.selectBestCompressor(sampleData);
+                    ColumnCompressor currentCompressor = columnCompressors.get(colName);
+                    
+                    // Solo cambiar si encontramos un compresor mejor que NoOp
+                    if (!(bestCompressor instanceof NoOpCompressor) || 
+                        !(currentCompressor instanceof NoOpCompressor)) {
+                        
+                        columnCompressors.put(colName, bestCompressor);
+                        
+                        // Comprimir datos completos de la columna
+                        compressColumnData(colName, blocks, dataType);
+                    }
+                }
+            } catch (Exception e) {
+                // Si falla la compresión, continuar con NoOp
+                columnCompressors.put(colName, new NoOpCompressor());
+            }
+        }
+    }
+    
+    /**
+     * Comprime los datos de una columna específica usando el compresor seleccionado.
+     */
+    private void compressColumnData(String colName, List<ColumnBlock> blocks, DataType dataType) {
+        try {
+            // Serializar todos los datos de la columna
+            ByteBuffer fullBuffer = ByteBuffer.allocate(blocks.size() * Page.PAGE_SIZE);
+            
+            synchronized (blocks) {
+                for (ColumnBlock block : blocks) {
+                    for (int i = 0; i < block.size(); i++) {
+                        Object value = block.get(i);
+                        PrimitiveSerializer.write(fullBuffer, value != null ? value : null, dataType);
+                    }
+                }
+            }
+            
+            byte[] rawData = Arrays.copyOf(fullBuffer.array(), fullBuffer.position());
+            ColumnCompressor compressor = columnCompressors.get(colName);
+            
+            // Comprimir datos
+            byte[] compressed = compressor.compress(rawData);
+            
+            // Solo guardar si hay compresión real
+            if (compressed.length < rawData.length) {
+                synchronized (compressedData) {
+                    compressedData.put(colName, compressed);
+                }
+            } else {
+                // Revertir a NoOp si no hay beneficio
+                columnCompressors.put(colName, new NoOpCompressor());
+                synchronized (compressedData) {
+                    compressedData.put(colName, new byte[0]);
+                }
+            }
+        } catch (Exception e) {
+            // En caso de error, usar NoOp
+            columnCompressors.put(colName, new NoOpCompressor());
+            synchronized (compressedData) {
+                compressedData.put(colName, new byte[0]);
+            }
         }
     }
     
