@@ -191,6 +191,14 @@ public class Row {
         }
         
         /**
+         * Converts this condition to a boolean predicate for use in lambda expressions.
+         * @return true if no conditions have failed, false otherwise
+         */
+        public boolean test() {
+            return !hasFailed;
+        }
+
+        /**
          * Internal method to check if any condition has failed.
          * Used by Filter.matches() to determine if the lambda predicate passed.
          */
