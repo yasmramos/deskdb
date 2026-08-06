@@ -43,14 +43,20 @@ public class Transaction implements AutoCloseable {
     
     private final boolean isImplicit;
     private boolean flushed = false; // Para evitar doble flush en transacciones bufferizadas
+    private final WriteConcern writeConcern;
 
     public Transaction(DeskDB db) { 
         this(db, true); // Por defecto es implícita (auto-commit)
     }
     
     public Transaction(DeskDB db, boolean isImplicit) {
+        this(db, isImplicit, WriteConcern.NORMAL);
+    }
+    
+    public Transaction(DeskDB db, boolean isImplicit, WriteConcern writeConcern) {
         this.db = db;
         this.isImplicit = isImplicit;
+        this.writeConcern = writeConcern;
         this.transactionId = transactionIdGenerator.incrementAndGet();
         this.wal = db.getWal(); // Obtener WAL de la base de datos
         
@@ -204,16 +210,25 @@ public class Transaction implements AutoCloseable {
                             }
                         }
                         
-                        tx.committed = true;
-                        logger.debug("Batch transaction {} committed", tx.transactionId);
+                        // Apply write concern for batch: only flush if SAFE mode
+                        WriteConcern batchWriteConcern = tx.writeConcern;
+                        if (batchWriteConcern == WriteConcern.SAFE) {
+                            wal.flush(); // Force fsync for SAFE mode
+                            logger.info(\"Batch commit completed with SAFE durability: {} transactions\", batch.size());
+                        } else {
+                            // NORMAL or ASYNC: skip immediate flush for better performance
+                            logger.info(\"Batch commit completed with {} durability: {} transactions\", batchWriteConcern, batch.size());
+                        }
                     } finally {
                         tx.lock.writeLock().unlock();
                     }
                 }
                 
-                // Flush único para todo el batch
-                wal.flush();
-                logger.info("Batch commit completed: {} transactions", batch.size());
+                // Flush único para todo el batch si es SAFE
+                if (tx.writeConcern == WriteConcern.SAFE) {
+                    wal.flush();
+                }
+                logger.info(\"Batch commit completed: {} transactions\", batch.size());
                 
             } catch (IOException e) {
                 logger.error("Failed to commit batch: {}", e.getMessage());
@@ -262,6 +277,18 @@ public class Transaction implements AutoCloseable {
                 
                 // Escribir COMMIT en WAL
                 wal.writeCommit(transactionId);
+                
+                // Apply write concern: flush based on durability level
+                if (writeConcern == WriteConcern.SAFE) {
+                    wal.flush(); // Force fsync for SAFE mode
+                } else if (writeConcern == WriteConcern.NORMAL) {
+                    // Batch flush - let the background thread handle it
+                    // Only flush if batch is large enough
+                    if (implicitTxBuffer.size() >= 50) {
+                        wal.flush();
+                    }
+                }
+                // ASYNC mode: no flush, data stays in OS buffer
             } catch (IOException e) {
                 logger.error("Failed to write to WAL during commit: {}", e.getMessage());
                 throw new RuntimeException("WAL write failed", e);

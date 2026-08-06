@@ -38,6 +38,7 @@ public class DeskDB implements AutoCloseable {
     private final Map<String, Map<String, BTree<?, ?>>> indexes; // tableName -> indexName -> BTree
     private final ObjectStore objectStore; // Single shared instance for object persistence
     private Wal wal;
+    private WriteConcern writeConcern = WriteConcern.NORMAL; // Default write concern
     private boolean closed = false;
     private final AtomicInteger transactionCounter = new AtomicInteger(0);
     private final ReentrantReadWriteLock dbLock = new ReentrantReadWriteLock();
@@ -287,13 +288,32 @@ public class DeskDB implements AutoCloseable {
             }
         }
         
-        Transaction tx = new Transaction(this, !autoCommit);
+        Transaction tx = new Transaction(this, !autoCommit, writeConcern);
         if (!autoCommit) {
             currentTransaction.set(tx);
         }
         logger.debug("Started new transaction {} in thread {} (autoCommit={})", 
             transactionCounter.incrementAndGet(), Thread.currentThread().getName(), autoCommit);
         return tx;
+    }
+    
+    /**
+     * Sets the write concern level for durability vs performance trade-off.
+     * 
+     * @param writeConcern The write concern level (ASYNC, NORMAL, or SAFE)
+     */
+    public void setWriteConcern(WriteConcern writeConcern) {
+        this.writeConcern = writeConcern;
+        logger.info("Write concern set to {}", writeConcern);
+    }
+    
+    /**
+     * Gets the current write concern level.
+     * 
+     * @return The current write concern level
+     */
+    public WriteConcern getWriteConcern() {
+        return writeConcern;
     }
     
     /**
