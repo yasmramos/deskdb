@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * Custom binary serializer for DeskDB ObjectStore.
@@ -22,28 +23,12 @@ import java.util.Map;
  * [Field Count (int)]
  *   For each field:
  *   [Field Name Length (short)] [Field Name (bytes)]
- *   [Type Code (byte)] [Value Data]
+ *   [DataType Ordinal (byte)] [Value Data]
  * 
- * Type Codes:
- * 0: NULL
- * 1: Boolean
- * 2: Integer
- * 3: Long
- * 4: Double
- * 5: String
- * 6: BigDecimal
- * 7: List/Array (Simple types only)
+ * Uses DataType enum ordinals for type codes to ensure predictability and extensibility.
+ * Supports: STRING, INT, LONG, DOUBLE, DECIMAL, BOOLEAN, DATE, TIMESTAMP, BLOB, JSON
  */
 public class BinarySerializer {
-
-    private static final byte TYPE_NULL = 0;
-    private static final byte TYPE_BOOLEAN = 1;
-    private static final byte TYPE_INT = 2;
-    private static final byte TYPE_LONG = 3;
-    private static final byte TYPE_DOUBLE = 4;
-    private static final byte TYPE_STRING = 5;
-    private static final byte TYPE_BIGDECIMAL = 6;
-    private static final byte TYPE_LIST = 7;
 
     /**
      * Serializes an object to a byte array.
@@ -141,41 +126,62 @@ public class BinarySerializer {
 
     private static void writeValue(DataOutputStream dos, Object value) throws IOException {
         if (value == null) {
-            dos.writeByte(TYPE_NULL);
+            // Use a special marker for null (we'll use DataType.STRING.ordinal() but with a flag)
+            // Actually, let's write -1 as a type marker for NULL to keep it simple
+            dos.writeByte(-1); // NULL marker
         } else if (value instanceof Boolean) {
-            dos.writeByte(TYPE_BOOLEAN);
+            dos.writeByte(DataType.BOOLEAN.ordinal());
             dos.writeBoolean((Boolean) value);
         } else if (value instanceof Integer) {
-            dos.writeByte(TYPE_INT);
+            dos.writeByte(DataType.INT.ordinal());
             dos.writeInt((Integer) value);
         } else if (value instanceof Long) {
-            dos.writeByte(TYPE_LONG);
+            dos.writeByte(DataType.LONG.ordinal());
             dos.writeLong((Long) value);
         } else if (value instanceof Double) {
-            dos.writeByte(TYPE_DOUBLE);
+            dos.writeByte(DataType.DOUBLE.ordinal());
             dos.writeDouble((Double) value);
         } else if (value instanceof String) {
-            dos.writeByte(TYPE_STRING);
+            dos.writeByte(DataType.STRING.ordinal());
             byte[] strBytes = ((String) value).getBytes(StandardCharsets.UTF_8);
             dos.writeInt(strBytes.length);
             dos.write(strBytes);
         } else if (value instanceof BigDecimal) {
-            dos.writeByte(TYPE_BIGDECIMAL);
+            dos.writeByte(DataType.DECIMAL.ordinal());
             String strVal = ((BigDecimal) value).toPlainString();
             byte[] strBytes = strVal.getBytes(StandardCharsets.UTF_8);
             dos.writeInt(strBytes.length);
             dos.write(strBytes);
+        } else if (value instanceof java.util.Date) {
+            dos.writeByte(DataType.DATE.ordinal());
+            dos.writeLong(((java.util.Date) value).getTime());
+        } else if (value instanceof java.sql.Timestamp) {
+            dos.writeByte(DataType.TIMESTAMP.ordinal());
+            dos.writeLong(((java.sql.Timestamp) value).getTime());
+            dos.writeInt(((java.sql.Timestamp) value).getNanos());
+        } else if (value instanceof byte[]) {
+            dos.writeByte(DataType.BLOB.ordinal());
+            byte[] blobData = (byte[]) value;
+            dos.writeInt(blobData.length);
+            dos.write(blobData);
+        } else if (value instanceof UUID) {
+            dos.writeByte(DataType.STRING.ordinal()); // Store UUID as string for compatibility
+            String uuidStr = ((UUID) value).toString();
+            byte[] strBytes = uuidStr.getBytes(StandardCharsets.UTF_8);
+            dos.writeInt(strBytes.length);
+            dos.write(strBytes);
         } else if (value instanceof List) {
-            dos.writeByte(TYPE_LIST);
+            // For lists, we need a way to mark them. Let's use JSON ordinal as a container marker
+            // or better, create a special LIST marker. For now, use -2 as LIST marker
+            dos.writeByte(-2); // LIST marker
             List<?> list = (List<?>) value;
             dos.writeInt(list.size());
             for (Object item : list) {
                 writeValue(dos, item);
             }
         } else {
-            // Unsupported type fallback: try toString or ignore
-            // For strict safety, we could throw, but for now we treat as string
-            dos.writeByte(TYPE_STRING);
+            // Unsupported type fallback: serialize as JSON string
+            dos.writeByte(DataType.JSON.ordinal());
             String strVal = value.toString();
             byte[] strBytes = strVal.getBytes(StandardCharsets.UTF_8);
             dos.writeInt(strBytes.length);
@@ -185,69 +191,114 @@ public class BinarySerializer {
 
     private static Object readValue(DataInputStream dis) throws IOException {
         byte type = dis.readByte();
-        switch (type) {
-            case TYPE_NULL:
-                return null;
-            case TYPE_BOOLEAN:
+        
+        // Handle NULL marker
+        if (type == -1) {
+            return null;
+        }
+        
+        // Handle LIST marker
+        if (type == -2) {
+            int size = dis.readInt();
+            List<Object> list = new ArrayList<>(size);
+            for (int i = 0; i < size; i++) {
+                list.add(readValue(dis));
+            }
+            return list;
+        }
+        
+        // Handle DataType enum ordinals
+        DataType dataType = DataType.values()[type];
+        switch (dataType) {
+            case BOOLEAN:
                 return dis.readBoolean();
-            case TYPE_INT:
+            case INT:
                 return dis.readInt();
-            case TYPE_LONG:
+            case LONG:
                 return dis.readLong();
-            case TYPE_DOUBLE:
+            case DOUBLE:
                 return dis.readDouble();
-            case TYPE_STRING:
+            case STRING:
+            case JSON: // JSON is stored as string
                 int lenStr = dis.readInt();
                 byte[] strBytes = new byte[lenStr];
                 dis.readFully(strBytes);
                 return new String(strBytes, StandardCharsets.UTF_8);
-            case TYPE_BIGDECIMAL:
+            case DECIMAL:
                 int lenBd = dis.readInt();
                 byte[] bdBytes = new byte[lenBd];
                 dis.readFully(bdBytes);
                 return new BigDecimal(new String(bdBytes, StandardCharsets.UTF_8));
-            case TYPE_LIST:
-                int size = dis.readInt();
-                List<Object> list = new ArrayList<>(size);
-                for (int i = 0; i < size; i++) {
-                    list.add(readValue(dis));
-                }
-                return list;
+            case DATE:
+                long dateMillis = dis.readLong();
+                return new java.util.Date(dateMillis);
+            case TIMESTAMP:
+                long tsMillis = dis.readLong();
+                int nanos = dis.readInt();
+                java.sql.Timestamp ts = new java.sql.Timestamp(tsMillis);
+                ts.setNanos(nanos);
+                return ts;
+            case BLOB:
+                int blobLen = dis.readInt();
+                byte[] blobData = new byte[blobLen];
+                dis.readFully(blobData);
+                return blobData;
             default:
-                throw new IOException("Unknown type code: " + type);
+                throw new IOException("Unknown or unsupported data type ordinal: " + type);
         }
     }
 
     private static void skipValue(DataInputStream dis) throws IOException {
         byte type = dis.readByte();
-        switch (type) {
-            case TYPE_NULL:
-                break;
-            case TYPE_BOOLEAN:
+        
+        // Handle NULL marker
+        if (type == -1) {
+            return;
+        }
+        
+        // Handle LIST marker
+        if (type == -2) {
+            int size = dis.readInt();
+            for (int i = 0; i < size; i++) {
+                skipValue(dis);
+            }
+            return;
+        }
+        
+        // Handle DataType enum ordinals
+        DataType dataType = DataType.values()[type];
+        switch (dataType) {
+            case BOOLEAN:
                 dis.readBoolean();
                 break;
-            case TYPE_INT:
+            case INT:
                 dis.readInt();
                 break;
-            case TYPE_LONG:
+            case LONG:
                 dis.readLong();
                 break;
-            case TYPE_DOUBLE:
+            case DOUBLE:
                 dis.readDouble();
                 break;
-            case TYPE_STRING:
-            case TYPE_BIGDECIMAL:
+            case STRING:
+            case JSON:
+            case DECIMAL:
                 int len = dis.readInt();
                 dis.skipBytes(len);
                 break;
-            case TYPE_LIST:
-                int size = dis.readInt();
-                for (int i = 0; i < size; i++) {
-                    skipValue(dis);
-                }
+            case DATE:
+                dis.readLong();
+                break;
+            case TIMESTAMP:
+                dis.readLong(); // millis
+                dis.readInt();  // nanos
+                break;
+            case BLOB:
+                int blobLen = dis.readInt();
+                dis.skipBytes(blobLen);
                 break;
             default:
-                throw new IOException("Unknown type code during skip: " + type);
+                throw new IOException("Unknown or unsupported data type ordinal during skip: " + type);
         }
     }
 

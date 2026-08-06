@@ -85,29 +85,45 @@ public class DeskDB implements AutoCloseable {
      * Creates an in-memory only DeskDB instance.
      * All data (both SQL tables and objects) will be lost when the instance is closed or the JVM exits.
      * This is useful for testing or temporary data storage.
-     * No temporary files are created - everything stays in RAM.
+     * 
+     * <p><strong>Performance Note:</strong> This implementation creates NO temporary files on the filesystem.
+     * All data structures reside purely in RAM using ConcurrentHashMaps and HashMaps. This avoids:
+     * <ul>
+     *   <li>File I/O overhead for read/write operations</li>
+     *   <li>Memory leaks from deleteOnExit() hooks in the JVM</li>
+     *   <li>Disk space consumption for temporary data</li>
+     * </ul>
+     * </p>
      *
      * @return In-memory DeskDB instance
-     * @throws IOException if there is an IO error
+     * @throws IOException if there is an IO error (should never happen for in-memory mode)
      */
     public static DeskDB inMemory() throws IOException {
-        // Use a dummy path since we won't persist anything to disk
-        Path dummyPath = java.nio.file.Paths.get("memory://deskdb_" + System.nanoTime());
+        // Use a symbolic path - no actual file operations occur when inMemoryOnly=true
+        Path virtualPath = java.nio.file.Paths.get("memory://deskdb_" + System.nanoTime());
         
-        DeskDB db = new DeskDB(dummyPath, true);
-        logger.info("In-memory DeskDB created (no disk I/O)");
+        DeskDB db = new DeskDB(virtualPath, true);
+        logger.info("In-memory DeskDB created (zero disk I/O, pure RAM storage)");
         return db;
     }
     
-    // Private constructor for in-memory mode
+    /**
+     * Private constructor for in-memory mode.
+     * Initializes all components without any filesystem interaction.
+     * 
+     * @param dbPath Virtual path (used only for identification, no file operations)
+     * @param inMemoryOnly Flag to disable all persistence operations
+     * @throws IOException if initialization fails
+     */
     private DeskDB(Path dbPath, boolean inMemoryOnly) throws IOException {
         this.dbPath = dbPath;
         this.catalogManager = new CatalogManager();
         this.inMemoryOnly = inMemoryOnly;
-        this.objectStore = new ObjectStore(this, true); // Initialize ObjectStore with in-memory flag
-        this.wal = null; // No WAL for in-memory mode
+        // Initialize ObjectStore with in-memory flag - no WAL or disk persistence
+        this.objectStore = new ObjectStore(this, true);
+        this.wal = null; // Explicitly null - no Write-Ahead Log for in-memory mode
         
-        logger.info("In-memory DeskDB initialized (no disk persistence)");
+        logger.info("In-memory DeskDB initialized (zero filesystem dependencies)");
     }
 
     /**
@@ -607,44 +623,36 @@ public class DeskDB implements AutoCloseable {
                     catalogManager.registerIndex(tableName, new java.util.concurrent.ConcurrentHashMap<>());
                 }
                 
-                // Read data if exists
-                if (in.available() >= 4) {
-                    int dataLength = in.readInt();
-                    if (dataLength > 0 && in.available() >= dataLength) {
-                        byte[] dataContent = new byte[dataLength];
-                        in.readFully(dataContent);
-                        
-                        ByteArrayInputStream dataBais = new ByteArrayInputStream(dataContent);
-                        DataInputStream dataIn = new DataInputStream(dataBais);
-                        
-                        // Read data from each table
-                        while (dataIn.available() > 0) {
-                            String tableName = dataIn.readUTF();
-                            int rowCount = dataIn.readInt();
+                // Read data from each table directly (matches write format)
+                while (in.available() >= 4) { // At least need 4 bytes for table name length
+                    String tableName = in.readUTF();
+                    int rowCount = in.readInt();
+                    logger.debug("Loading {} rows from table {}", rowCount, tableName);
+                    
+                    Table table = catalogManager.getTable(tableName);
+                    if (table != null) {
+                        for (int i = 0; i < rowCount; i++) {
+                            long rowId = in.readLong();
+                            int valueCount = in.readInt();
+                            Map<String, Object> values = new java.util.HashMap<>();
                             
-                            Table table = catalogManager.getTable(tableName);
-                            if (table != null) {
-                                for (int i = 0; i < rowCount; i++) {
-                                    long rowId = dataIn.readLong();
-                                    int valueCount = dataIn.readInt();
-                                    Map<String, Object> values = new java.util.HashMap<>();
-                                    
-                                    for (int j = 0; j < valueCount; j++) {
-                                        String key = dataIn.readUTF();
-                                        Object value = readValue(dataIn);
-                                        values.put(key, value);
-                                    }
-                                    
-                                    Row row = new Row(rowId, values);
-                                    table.getData().put(rowId, row);
-                                }
+                            for (int j = 0; j < valueCount; j++) {
+                                String key = in.readUTF();
+                                Object value = readValue(in);
+                                values.put(key, value);
+                                logger.trace("  {} = {} [type={}]", key, value, value != null ? value.getClass().getSimpleName() : "null");
                             }
+                            
+                            Row row = new Row(rowId, values);
+                            table.getData().put(rowId, row);
+                            logger.debug("  Loaded row {} with {} values", rowId, valueCount);
                         }
-                        
-                        dataIn.close();
-                        logger.info("Data loaded from file");
+                    } else {
+                        logger.warn("Table {} not found in catalog, skipping {} rows", tableName, rowCount);
                     }
                 }
+                
+                logger.info("Data loaded from file: {} tables processed", catalogManager.getAllTables().size());
                 
                 in.close();
                 logger.info("Schemas and data loaded from {}", dbPath);
@@ -657,20 +665,46 @@ public class DeskDB implements AutoCloseable {
     }
     
     private Object readValue(DataInputStream in) throws IOException {
-        boolean hasValue = in.readBoolean();
-        if (!hasValue) {
+        // Read type code (matches writeValue format)
+        byte typeCode = in.readByte();
+        
+        // Handle NULL marker (-1)
+        if (typeCode == -1) {
             return null;
         }
         
-        // Leer tipo y valor
-        byte typeFlag = in.readByte();
-        switch (typeFlag) {
-            case 0: return in.readUTF();      // String
-            case 1: return in.readInt();       // Integer
-            case 2: return in.readLong();      // Long
-            case 3: return in.readDouble();    // Double
-            case 4: return in.readBoolean();   // Boolean
-            default: return in.readUTF();      // Fallback a String
+        // Handle DataType enum ordinals
+        DataType dataType = DataType.values()[typeCode];
+        switch (dataType) {
+            case STRING:
+            case JSON:
+                return in.readUTF();
+            case INT:
+                return in.readInt();
+            case LONG:
+                return in.readLong();
+            case DOUBLE:
+                return in.readDouble();
+            case BOOLEAN:
+                return in.readBoolean();
+            case DECIMAL:
+                String bdStr = in.readUTF();
+                return new java.math.BigDecimal(bdStr);
+            case DATE:
+                return new java.util.Date(in.readLong());
+            case TIMESTAMP:
+                long tsMillis = in.readLong();
+                int nanos = in.readInt();
+                java.sql.Timestamp ts = new java.sql.Timestamp(tsMillis);
+                ts.setNanos(nanos);
+                return ts;
+            case BLOB:
+                int blobLen = in.readInt();
+                byte[] blobData = new byte[blobLen];
+                in.readFully(blobData);
+                return blobData;
+            default:
+                throw new IOException("Unknown or unsupported data type during load: " + dataType);
         }
     }
 
@@ -700,8 +734,7 @@ public class DeskDB implements AutoCloseable {
                 out.writeInt(catalogManager.getAllSchemas().size());
                 
                 // Save each schema
-                for (Map.Entry<String, TableSchema> entry : catalogManager.getAllSchemas()) {
-                    TableSchema schema = schema;
+                for (TableSchema schema : catalogManager.getAllSchemas()) {
                     out.writeUTF(schema.getName());
                     
                     // Save schema columns
@@ -716,12 +749,11 @@ public class DeskDB implements AutoCloseable {
                 }
                 
                 // Save data from each table directly to file (streaming, no intermediate buffer)
-                for (Map.Entry<String, Table> entry : catalogManager.getAllTables()) {
-                    Table table = schema;
+                for (Table table : catalogManager.getAllTables()) {
                     Map<Long, Row> tableData = getTableData(table);
                     
                     // Write table marker
-                    out.writeUTF(schema.getName());
+                    out.writeUTF(table.getName());
                     out.writeInt(tableData.size());
                     
                     // Write each row directly from internal map
@@ -761,30 +793,45 @@ public class DeskDB implements AutoCloseable {
     
     private void writeValue(DataOutputStream out, Object value) throws IOException {
         if (value == null) {
-            out.writeBoolean(false);
+            // Write NULL marker (-1)
+            out.writeByte(-1);
             return;
         }
         
-        out.writeBoolean(true);
-        
-        // Escribir tipo y valor
-        if (value instanceof String) {
-            out.writeByte(0);
-            out.writeUTF((String) value);
+        // Write DataType enum ordinal followed by value
+        if (value instanceof Boolean) {
+            out.writeByte(DataType.BOOLEAN.ordinal());
+            out.writeBoolean((Boolean) value);
         } else if (value instanceof Integer) {
-            out.writeByte(1);
+            out.writeByte(DataType.INT.ordinal());
             out.writeInt((Integer) value);
         } else if (value instanceof Long) {
-            out.writeByte(2);
+            out.writeByte(DataType.LONG.ordinal());
             out.writeLong((Long) value);
         } else if (value instanceof Double) {
-            out.writeByte(3);
+            out.writeByte(DataType.DOUBLE.ordinal());
             out.writeDouble((Double) value);
-        } else if (value instanceof Boolean) {
-            out.writeByte(4);
-            out.writeBoolean((Boolean) value);
+        } else if (value instanceof String) {
+            out.writeByte(DataType.STRING.ordinal());
+            out.writeUTF((String) value);
+        } else if (value instanceof java.math.BigDecimal) {
+            out.writeByte(DataType.DECIMAL.ordinal());
+            out.writeUTF(((java.math.BigDecimal) value).toPlainString());
+        } else if (value instanceof java.util.Date) {
+            out.writeByte(DataType.DATE.ordinal());
+            out.writeLong(((java.util.Date) value).getTime());
+        } else if (value instanceof java.sql.Timestamp) {
+            out.writeByte(DataType.TIMESTAMP.ordinal());
+            out.writeLong(((java.sql.Timestamp) value).getTime());
+            out.writeInt(((java.sql.Timestamp) value).getNanos());
+        } else if (value instanceof byte[]) {
+            out.writeByte(DataType.BLOB.ordinal());
+            byte[] blobData = (byte[]) value;
+            out.writeInt(blobData.length);
+            out.write(blobData);
         } else {
-            out.writeByte(0);
+            // Fallback: serialize as JSON string
+            out.writeByte(DataType.JSON.ordinal());
             out.writeUTF(value.toString());
         }
     }
