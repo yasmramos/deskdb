@@ -210,22 +210,28 @@ public class Transaction implements AutoCloseable {
                             }
                         }
                         
-                        // Apply write concern for batch: only flush if SAFE mode
-                        WriteConcern batchWriteConcern = tx.writeConcern;
-                        if (batchWriteConcern == WriteConcern.SAFE) {
+                        // Apply write concern for this transaction: only flush if SAFE mode
+                        if (tx.writeConcern == WriteConcern.SAFE) {
                             wal.flush(); // Force fsync for SAFE mode
-                            logger.info("Batch commit completed with SAFE durability: {} transactions", batch.size());
+                            logger.info("Transaction {} committed with SAFE durability", tx.transactionId);
                         } else {
                             // NORMAL or ASYNC: skip immediate flush for better performance
-                            logger.info("Batch commit completed with {} durability: {} transactions", batchWriteConcern, batch.size());
+                            logger.info("Transaction {} committed with {} durability", tx.transactionId, tx.writeConcern);
                         }
                     } finally {
                         tx.lock.writeLock().unlock();
                     }
                 }
                 
-                // Flush único para todo el batch si es SAFE
-                if (tx.writeConcern == WriteConcern.SAFE) {
+                // Flush unico para todo el batch si alguna transaccion es SAFE
+                boolean anySafe = false;
+                for (Transaction t : batch) {
+                    if (t.writeConcern == WriteConcern.SAFE) {
+                        anySafe = true;
+                        break;
+                    }
+                }
+                if (anySafe) {
                     wal.flush();
                 }
                 logger.info("Batch commit completed: {} transactions", batch.size());
