@@ -41,8 +41,8 @@ import com.deskdb.core.DataType;
 @Fork(2)
 public class EmbeddedDatabaseBenchmark {
 
-    // Test data size
-    private static final int BATCH_SIZE = 1000;
+    // Test data size - increased for better batch throughput
+    private static final int BATCH_SIZE = 5000;
     
     // ID counter for unique inserts
     private int currentId = 1;
