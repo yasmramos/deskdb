@@ -85,29 +85,45 @@ public class DeskDB implements AutoCloseable {
      * Creates an in-memory only DeskDB instance.
      * All data (both SQL tables and objects) will be lost when the instance is closed or the JVM exits.
      * This is useful for testing or temporary data storage.
-     * No temporary files are created - everything stays in RAM.
+     * 
+     * <p><strong>Performance Note:</strong> This implementation creates NO temporary files on the filesystem.
+     * All data structures reside purely in RAM using ConcurrentHashMaps and HashMaps. This avoids:
+     * <ul>
+     *   <li>File I/O overhead for read/write operations</li>
+     *   <li>Memory leaks from deleteOnExit() hooks in the JVM</li>
+     *   <li>Disk space consumption for temporary data</li>
+     * </ul>
+     * </p>
      *
      * @return In-memory DeskDB instance
-     * @throws IOException if there is an IO error
+     * @throws IOException if there is an IO error (should never happen for in-memory mode)
      */
     public static DeskDB inMemory() throws IOException {
-        // Use a dummy path since we won't persist anything to disk
-        Path dummyPath = java.nio.file.Paths.get("memory://deskdb_" + System.nanoTime());
+        // Use a symbolic path - no actual file operations occur when inMemoryOnly=true
+        Path virtualPath = java.nio.file.Paths.get("memory://deskdb_" + System.nanoTime());
         
-        DeskDB db = new DeskDB(dummyPath, true);
-        logger.info("In-memory DeskDB created (no disk I/O)");
+        DeskDB db = new DeskDB(virtualPath, true);
+        logger.info("In-memory DeskDB created (zero disk I/O, pure RAM storage)");
         return db;
     }
     
-    // Private constructor for in-memory mode
+    /**
+     * Private constructor for in-memory mode.
+     * Initializes all components without any filesystem interaction.
+     * 
+     * @param dbPath Virtual path (used only for identification, no file operations)
+     * @param inMemoryOnly Flag to disable all persistence operations
+     * @throws IOException if initialization fails
+     */
     private DeskDB(Path dbPath, boolean inMemoryOnly) throws IOException {
         this.dbPath = dbPath;
         this.catalogManager = new CatalogManager();
         this.inMemoryOnly = inMemoryOnly;
-        this.objectStore = new ObjectStore(this, true); // Initialize ObjectStore with in-memory flag
-        this.wal = null; // No WAL for in-memory mode
+        // Initialize ObjectStore with in-memory flag - no WAL or disk persistence
+        this.objectStore = new ObjectStore(this, true);
+        this.wal = null; // Explicitly null - no Write-Ahead Log for in-memory mode
         
-        logger.info("In-memory DeskDB initialized (no disk persistence)");
+        logger.info("In-memory DeskDB initialized (zero filesystem dependencies)");
     }
 
     /**
@@ -700,8 +716,7 @@ public class DeskDB implements AutoCloseable {
                 out.writeInt(catalogManager.getAllSchemas().size());
                 
                 // Save each schema
-                for (Map.Entry<String, TableSchema> entry : catalogManager.getAllSchemas()) {
-                    TableSchema schema = schema;
+                for (TableSchema schema : catalogManager.getAllSchemas()) {
                     out.writeUTF(schema.getName());
                     
                     // Save schema columns
@@ -716,12 +731,11 @@ public class DeskDB implements AutoCloseable {
                 }
                 
                 // Save data from each table directly to file (streaming, no intermediate buffer)
-                for (Map.Entry<String, Table> entry : catalogManager.getAllTables()) {
-                    Table table = schema;
+                for (Table table : catalogManager.getAllTables()) {
                     Map<Long, Row> tableData = getTableData(table);
                     
                     // Write table marker
-                    out.writeUTF(schema.getName());
+                    out.writeUTF(table.getName());
                     out.writeInt(tableData.size());
                     
                     // Write each row directly from internal map
