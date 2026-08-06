@@ -118,6 +118,15 @@ public class Row {
             return this;
         }
         
+        /**
+         * Returns the boolean result of the accumulated conditions.
+         * This allows LambdaFieldCondition to be used as a Predicate<Row>.
+         * @return true if no conditions have failed, false otherwise
+         */
+        public boolean getValue() {
+            return !hasFailed;
+        }
+        
         public LambdaFieldCondition between(Object from, Object to) {
             Object fieldValue = row.get(fieldName);
             if (fieldValue == null || !isGreaterThanOrEqual(fieldValue, from) || !isLessThanOrEqual(fieldValue, to)) {

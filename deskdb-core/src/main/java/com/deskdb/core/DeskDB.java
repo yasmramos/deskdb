@@ -637,7 +637,7 @@ public class DeskDB implements AutoCloseable {
                                         break;
                                     default:
                                         // Skip unsupported default value types for backward compatibility
-                                        logger.warn(\"Skipping unsupported default value type: {}\", typeCode);
+                                        logger.warn("Skipping unsupported default value type: {}", typeCode);
                                         break;
                                 }
                             }
@@ -777,6 +777,16 @@ public class DeskDB implements AutoCloseable {
                         out.writeUTF(col.getType().name());
                         out.writeBoolean(col.isPrimaryKey());
                         out.writeBoolean(col.isNotNull());
+                        out.writeBoolean(col.isUnique());
+                        
+                        // Save default value
+                        Object defaultValue = col.getDefaultValue();
+                        if (defaultValue != null) {
+                            out.writeBoolean(true);
+                            writeValue(out, defaultValue);
+                        } else {
+                            out.writeBoolean(false);
+                        }
                     }
                 }
                 

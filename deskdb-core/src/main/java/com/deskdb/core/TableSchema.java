@@ -52,13 +52,11 @@ public class TableSchema {
         for (Map<String, Object> colData : colsData) {
             String colName = (String) colData.get("name");
             DataType type = DataType.valueOf((String) colData.get("type"));
-            Column col = new Column(colName, type);
-            if (colData.containsKey("primaryKey")) {
-                col.setPrimaryKey((Boolean) colData.get("primaryKey"));
-            }
-            if (colData.containsKey("notNull")) {
-                col.setNotNull((Boolean) colData.get("notNull"));
-            }
+            boolean primaryKey = colData.containsKey("primaryKey") && (Boolean) colData.get("primaryKey");
+            boolean notNull = colData.containsKey("notNull") && (Boolean) colData.get("notNull");
+            boolean unique = colData.containsKey("unique") && (Boolean) colData.get("unique");
+            Object defaultValue = colData.get("defaultValue");
+            Column col = Column.deserialize(colName, type, primaryKey, notNull, unique, defaultValue);
             cols.add(col);
         }
         return new TableSchema(name, cols);
