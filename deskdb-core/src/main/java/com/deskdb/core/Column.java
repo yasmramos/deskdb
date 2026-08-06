@@ -32,6 +32,10 @@ public class Column {
     }
 
     public Column defaultValue(Object value) {
+        if (value != null && !this.type.isCompatible(value.getClass())) {
+            throw new IllegalArgumentException("Default value type mismatch for column " + name + 
+                ": expected " + this.type + " but got " + value.getClass().getSimpleName());
+        }
         this.defaultValue = value;
         return this;
     }
@@ -47,4 +51,6 @@ public class Column {
     // Setters for deserialization
     void setPrimaryKey(boolean primaryKey) { this.primaryKey = primaryKey; }
     void setNotNull(boolean notNull) { this.notNull = notNull; }
+    void setUnique(boolean unique) { this.unique = unique; }
+    void setDefaultValue(Object defaultValue) { this.defaultValue = defaultValue; }
 }
