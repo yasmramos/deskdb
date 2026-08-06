@@ -191,7 +191,7 @@ public class DeskDB implements AutoCloseable {
             Table table = new Table(tableName, List.of(columns), dbPath.toString());
             table.setDb(this);
             catalogManager.registerTable(table);
-            catalogManager.registerIndex(tableName, new java.util.concurrent.ConcurrentHashMap<>);
+            catalogManager.registerIndex(tableName, new java.util.concurrent.ConcurrentHashMap<>());
             
             // Crear índice automático para primary key
             for (Column col : columns) {
