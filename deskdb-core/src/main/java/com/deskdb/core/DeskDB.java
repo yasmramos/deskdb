@@ -90,17 +90,17 @@ public class DeskDB implements AutoCloseable {
      * Creates an in-memory only DeskDB instance.
      * All data (both SQL tables and objects) will be lost when the instance is closed or the JVM exits.
      * This is useful for testing or temporary data storage.
+     * No temporary files are created - everything stays in RAM.
      *
      * @return In-memory DeskDB instance
      * @throws IOException if there is an IO error
      */
     public static DeskDB inMemory() throws IOException {
-        // Create a temporary path that won't be persisted
-        Path tempPath = Files.createTempFile("deskdb_inmemory_", ".deskdb");
-        tempPath.toFile().deleteOnExit();
+        // Use a dummy path since we won't persist anything to disk
+        Path dummyPath = java.nio.file.Paths.get("memory://deskdb_" + System.nanoTime());
         
-        DeskDB db = new DeskDB(tempPath, true);
-        logger.info("In-memory DeskDB created");
+        DeskDB db = new DeskDB(dummyPath, true);
+        logger.info("In-memory DeskDB created (no disk I/O)");
         return db;
     }
     
