@@ -8,12 +8,15 @@ import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Custom binary serializer for DeskDB ObjectStore.
@@ -27,8 +30,23 @@ import java.util.UUID;
  * 
  * Uses DataType enum ordinals for type codes to ensure predictability and extensibility.
  * Supports: STRING, INT, LONG, DOUBLE, DECIMAL, BOOLEAN, DATE, TIMESTAMP, BLOB, JSON
+ * 
+ * Features:
+ * - Fail-fast on unsupported types (no silent corruption)
+ * - Reflection caching for performance
+ * - Efficient BigDecimal binary serialization
+ * - Proper handling of field shadowing in inheritance hierarchies
  */
 public class BinarySerializer {
+
+    /** Cache of serializable fields per class for performance */
+    private static final Map<String, List<Field>> FIELD_CACHE = new ConcurrentHashMap<>();
+
+    /** Type marker for NULL values */
+    private static final byte TYPE_NULL = -1;
+
+    /** Type marker for LIST containers */
+    private static final byte TYPE_LIST = -2;
 
     /**
      * Serializes an object to a byte array.
@@ -61,8 +79,7 @@ public class BinarySerializer {
                 // Write type and value
                 writeValue(dos, value);
             } catch (IllegalAccessException e) {
-                // Skip inaccessible fields
-                continue;
+                throw new IOException("Failed to access field during serialization: " + field.getName(), e);
             }
         }
 
@@ -86,11 +103,13 @@ public class BinarySerializer {
 
             int fieldCount = dis.readInt();
             
-            // Map available fields in the class for quick lookup
+            // Map available fields in the class for quick lookup using composite key to handle shadowing
             Map<String, Field> classFields = new HashMap<>();
             for (Field f : getSerializableFields(clazz)) {
                 f.setAccessible(true);
-                classFields.put(f.getName(), f);
+                // Use composite key: className#fieldName to handle field shadowing correctly
+                String key = f.getDeclaringClass().getName() + "#" + f.getName();
+                classFields.put(key, f);
             }
 
             for (int i = 0; i < fieldCount; i++) {
@@ -100,16 +119,23 @@ public class BinarySerializer {
                 dis.readFully(nameBytes);
                 String fieldName = new String(nameBytes, StandardCharsets.UTF_8);
 
-                // If the current class has this field, set it. Otherwise, skip the value.
-                Field targetField = classFields.get(fieldName);
+                // Try to find field by simple name first (backward compatibility)
+                Field targetField = null;
+                for (Field f : classFields.values()) {
+                    if (f.getName().equals(fieldName)) {
+                        targetField = f;
+                        break;
+                    }
+                }
+                
                 if (targetField != null) {
                     Object value = readValue(dis);
                     try {
                         targetField.set(obj, value);
                     } catch (IllegalArgumentException e) {
-                        // Type mismatch between stored data and current class definition.
-                        // Log warning or ignore to maintain stability.
-                        System.err.println("Warning: Type mismatch for field " + fieldName + " in " + clazz.getName());
+                        throw new IOException("Type mismatch for field '" + fieldName + "' in " + clazz.getName() + 
+                            ". Expected " + targetField.getType().getSimpleName() + " but got " + 
+                            (value != null ? value.getClass().getSimpleName() : "null"), e);
                     }
                 } else {
                     // Field exists in data but not in class (schema evolution: field removed).
@@ -126,9 +152,7 @@ public class BinarySerializer {
 
     private static void writeValue(DataOutputStream dos, Object value) throws IOException {
         if (value == null) {
-            // Use a special marker for null (we'll use DataType.STRING.ordinal() but with a flag)
-            // Actually, let's write -1 as a type marker for NULL to keep it simple
-            dos.writeByte(-1); // NULL marker
+            dos.writeByte(TYPE_NULL);
         } else if (value instanceof Boolean) {
             dos.writeByte(DataType.BOOLEAN.ordinal());
             dos.writeBoolean((Boolean) value);
@@ -147,11 +171,13 @@ public class BinarySerializer {
             dos.writeInt(strBytes.length);
             dos.write(strBytes);
         } else if (value instanceof BigDecimal) {
+            // Efficient binary serialization for BigDecimal
             dos.writeByte(DataType.DECIMAL.ordinal());
-            String strVal = ((BigDecimal) value).toPlainString();
-            byte[] strBytes = strVal.getBytes(StandardCharsets.UTF_8);
-            dos.writeInt(strBytes.length);
-            dos.write(strBytes);
+            BigDecimal bd = (BigDecimal) value;
+            dos.writeInt(bd.scale());
+            byte[] unscaled = bd.unscaledValue().toByteArray();
+            dos.writeInt(unscaled.length);
+            dos.write(unscaled);
         } else if (value instanceof java.util.Date) {
             dos.writeByte(DataType.DATE.ordinal());
             dos.writeLong(((java.util.Date) value).getTime());
@@ -165,27 +191,22 @@ public class BinarySerializer {
             dos.writeInt(blobData.length);
             dos.write(blobData);
         } else if (value instanceof UUID) {
-            dos.writeByte(DataType.STRING.ordinal()); // Store UUID as string for compatibility
+            dos.writeByte(DataType.STRING.ordinal());
             String uuidStr = ((UUID) value).toString();
             byte[] strBytes = uuidStr.getBytes(StandardCharsets.UTF_8);
             dos.writeInt(strBytes.length);
             dos.write(strBytes);
         } else if (value instanceof List) {
-            // For lists, we need a way to mark them. Let's use JSON ordinal as a container marker
-            // or better, create a special LIST marker. For now, use -2 as LIST marker
-            dos.writeByte(-2); // LIST marker
+            dos.writeByte(TYPE_LIST);
             List<?> list = (List<?>) value;
             dos.writeInt(list.size());
             for (Object item : list) {
                 writeValue(dos, item);
             }
         } else {
-            // Unsupported type fallback: serialize as JSON string
-            dos.writeByte(DataType.JSON.ordinal());
-            String strVal = value.toString();
-            byte[] strBytes = strVal.getBytes(StandardCharsets.UTF_8);
-            dos.writeInt(strBytes.length);
-            dos.write(strBytes);
+            // Fail-fast: throw exception for unsupported types instead of silent corruption
+            throw new IOException("Unsupported type for serialization: " + value.getClass().getName() + 
+                ". Supported types are: String, Integer, Long, Double, Boolean, BigDecimal, Date, Timestamp, byte[], UUID, List");
         }
     }
 
@@ -193,12 +214,12 @@ public class BinarySerializer {
         byte type = dis.readByte();
         
         // Handle NULL marker
-        if (type == -1) {
+        if (type == TYPE_NULL) {
             return null;
         }
         
         // Handle LIST marker
-        if (type == -2) {
+        if (type == TYPE_LIST) {
             int size = dis.readInt();
             List<Object> list = new ArrayList<>(size);
             for (int i = 0; i < size; i++) {
@@ -208,6 +229,10 @@ public class BinarySerializer {
         }
         
         // Handle DataType enum ordinals
+        if (type < 0 || type >= DataType.values().length) {
+            throw new IOException("Unknown or unsupported data type ordinal: " + type);
+        }
+        
         DataType dataType = DataType.values()[type];
         switch (dataType) {
             case BOOLEAN:
@@ -225,10 +250,12 @@ public class BinarySerializer {
                 dis.readFully(strBytes);
                 return new String(strBytes, StandardCharsets.UTF_8);
             case DECIMAL:
+                // Efficient binary deserialization for BigDecimal
+                int scale = dis.readInt();
                 int lenBd = dis.readInt();
-                byte[] bdBytes = new byte[lenBd];
-                dis.readFully(bdBytes);
-                return new BigDecimal(new String(bdBytes, StandardCharsets.UTF_8));
+                byte[] unscaledBytes = new byte[lenBd];
+                dis.readFully(unscaledBytes);
+                return new BigDecimal(new BigInteger(unscaledBytes), scale);
             case DATE:
                 long dateMillis = dis.readLong();
                 return new java.util.Date(dateMillis);
@@ -244,7 +271,7 @@ public class BinarySerializer {
                 dis.readFully(blobData);
                 return blobData;
             default:
-                throw new IOException("Unknown or unsupported data type ordinal: " + type);
+                throw new IOException("Unknown or unsupported data type: " + dataType);
         }
     }
 
@@ -252,12 +279,12 @@ public class BinarySerializer {
         byte type = dis.readByte();
         
         // Handle NULL marker
-        if (type == -1) {
+        if (type == TYPE_NULL) {
             return;
         }
         
         // Handle LIST marker
-        if (type == -2) {
+        if (type == TYPE_LIST) {
             int size = dis.readInt();
             for (int i = 0; i < size; i++) {
                 skipValue(dis);
@@ -266,6 +293,10 @@ public class BinarySerializer {
         }
         
         // Handle DataType enum ordinals
+        if (type < 0 || type >= DataType.values().length) {
+            throw new IOException("Unknown or unsupported data type ordinal during skip: " + type);
+        }
+        
         DataType dataType = DataType.values()[type];
         switch (dataType) {
             case BOOLEAN:
@@ -282,9 +313,17 @@ public class BinarySerializer {
                 break;
             case STRING:
             case JSON:
+                int lenStr = dis.readInt();
+                // Use readFully to guarantee all bytes are read (skipBytes doesn't guarantee full skip)
+                byte[] discardStr = new byte[lenStr];
+                dis.readFully(discardStr);
+                break;
             case DECIMAL:
-                int len = dis.readInt();
-                dis.skipBytes(len);
+                // Skip scale and unscaled value length
+                dis.readInt(); // scale
+                int lenBd = dis.readInt();
+                byte[] discardBd = new byte[lenBd];
+                dis.readFully(discardBd);
                 break;
             case DATE:
                 dis.readLong();
@@ -295,27 +334,39 @@ public class BinarySerializer {
                 break;
             case BLOB:
                 int blobLen = dis.readInt();
-                dis.skipBytes(blobLen);
+                // Use readFully to guarantee all bytes are read
+                byte[] discardBlob = new byte[blobLen];
+                dis.readFully(discardBlob);
                 break;
             default:
-                throw new IOException("Unknown or unsupported data type ordinal during skip: " + type);
+                throw new IOException("Unknown or unsupported data type during skip: " + dataType);
         }
     }
 
+    /**
+     * Gets all serializable fields for a class, including inherited fields.
+     * Uses caching to avoid expensive reflection operations on hot paths.
+     */
     private static List<Field> getSerializableFields(Class<?> clazz) {
-        List<Field> fields = new ArrayList<>();
-        while (clazz != null && clazz != Object.class) {
-            for (Field field : clazz.getDeclaredFields()) {
-                int modifiers = field.getModifiers();
-                // Exclude static, transient, synthetic
-                if (!Modifier.isStatic(modifiers) && 
-                    !Modifier.isTransient(modifiers) && 
-                    !field.isSynthetic()) {
-                    fields.add(field);
+        // Use class name as cache key
+        String cacheKey = clazz.getName();
+        return FIELD_CACHE.computeIfAbsent(cacheKey, k -> {
+            List<Field> fields = new ArrayList<>();
+            Class<?> current = clazz;
+            while (current != null && current != Object.class) {
+                for (Field field : current.getDeclaredFields()) {
+                    int modifiers = field.getModifiers();
+                    // Exclude static, transient, synthetic
+                    if (!Modifier.isStatic(modifiers) && 
+                        !Modifier.isTransient(modifiers) && 
+                        !field.isSynthetic()) {
+                        field.setAccessible(true);
+                        fields.add(field);
+                    }
                 }
+                current = current.getSuperclass();
             }
-            clazz = clazz.getSuperclass();
-        }
-        return fields;
+            return Collections.unmodifiableList(fields);
+        });
     }
 }
