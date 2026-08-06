@@ -378,10 +378,6 @@ public class DeskDB implements AutoCloseable {
      * Gets the index map for a table.
      */
     Map<String, BTree<?, ?>> getIndexMap(String tableName) {
-        catalogManager.getIndex(tableName) = catalogManager.getIndex(tableName);
-        
-            return new java.util.HashMap<>();
-        }
         return catalogManager.getIndex(tableName);
     }
 
