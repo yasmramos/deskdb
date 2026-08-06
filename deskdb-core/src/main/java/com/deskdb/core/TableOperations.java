@@ -8,6 +8,9 @@ import com.deskdb.query.HistoryBuilder;
 import com.deskdb.query.ExportBuilder;
 import com.deskdb.query.ImportBuilder;
 
+import java.util.List;
+import java.util.Map;
+
 public class TableOperations {
     private final DeskDB db;
     private final String tableName;
@@ -58,6 +61,78 @@ public class TableOperations {
             throw new RuntimeException("Table '" + tableName + "' not found");
         }
         return new InsertBuilder(table);
+    }
+
+    /**
+     * Optimized batch insert operation that inserts multiple rows in a single transaction.
+     * This method automatically wraps all inserts in a transaction for better performance.
+     * 
+     * @param rows List of maps where each map represents a row with column names as keys
+     * @return number of rows inserted
+     * @throws Exception if any insert fails
+     */
+    public int insertBatch(List<Map<String, Object>> rows) throws Exception {
+        if (rows == null || rows.isEmpty()) {
+            return 0;
+        }
+        
+        // If we're already in a transaction, use it directly
+        if (transaction != null) {
+            int count = 0;
+            for (Map<String, Object> row : rows) {
+                InsertBuilder builder = new InsertBuilder(transaction, tableName);
+                for (Map.Entry<String, Object> entry : row.entrySet()) {
+                    builder.value(entry.getKey(), entry.getValue());
+                }
+                builder.execute();
+                count++;
+            }
+            return count;
+        }
+        
+        // Otherwise, create a new transaction for the entire batch
+        try (Transaction tx = db.beginTransaction()) {
+            int count = 0;
+            for (Map<String, Object> row : rows) {
+                InsertBuilder builder = new InsertBuilder(tx, tableName);
+                for (Map.Entry<String, Object> entry : row.entrySet()) {
+                    builder.value(entry.getKey(), entry.getValue());
+                }
+                builder.execute();
+                count++;
+            }
+            tx.commit();
+            return count;
+        }
+    }
+
+    /**
+     * Optimized bulk insert using arrays for better memory efficiency.
+     * Each array element represents a row, and the order must match the table schema.
+     * 
+     * @param rows Array of row data arrays
+     * @param columns Column names in the same order as the data arrays
+     * @return number of rows inserted
+     * @throws Exception if any insert fails
+     */
+    public int insertBulk(Object[][] rows, String[] columns) throws Exception {
+        if (rows == null || rows.length == 0) {
+            return 0;
+        }
+        
+        try (Transaction tx = db.beginTransaction()) {
+            int count = 0;
+            for (Object[] rowData : rows) {
+                InsertBuilder builder = new InsertBuilder(tx, tableName);
+                for (int i = 0; i < columns.length && i < rowData.length; i++) {
+                    builder.value(columns[i], rowData[i]);
+                }
+                builder.execute();
+                count++;
+            }
+            tx.commit();
+            return count;
+        }
     }
 
     public UpdateBuilder update() {
