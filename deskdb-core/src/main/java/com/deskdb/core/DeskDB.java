@@ -184,27 +184,34 @@ public class DeskDB implements AutoCloseable {
      */
     public Table createTable(String tableName, Column... columns) throws IOException {
         checkClosed();
-        if (tables.containsKey(tableName)) {
-            throw new IllegalStateException("La tabla '" + tableName + "' ya existe");
-        }
         
-        TableSchema schema = new TableSchema(tableName, List.of(columns));
-        registerSchema(tableName, schema);
-        
-        Table table = new Table(tableName, List.of(columns), dbPath.toString());
-        table.setDb(this);
-        tables.put(tableName, table);
-        indexes.put(tableName, new ConcurrentHashMap<>());
-        
-        // Crear índice automático para primary key
-        for (Column col : columns) {
-            if (col.isPrimaryKey()) {
-                createIndex(tableName, col.getName() + "_idx", col.getName());
+        // Use write lock to ensure thread-safe table creation
+        dbLock.writeLock().lock();
+        try {
+            if (tables.containsKey(tableName)) {
+                throw new IllegalStateException("La tabla '" + tableName + "' ya existe");
             }
+            
+            TableSchema schema = new TableSchema(tableName, List.of(columns));
+            registerSchema(tableName, schema);
+            
+            Table table = new Table(tableName, List.of(columns), dbPath.toString());
+            table.setDb(this);
+            tables.put(tableName, table);
+            indexes.put(tableName, new ConcurrentHashMap<>());
+            
+            // Crear índice automático para primary key
+            for (Column col : columns) {
+                if (col.isPrimaryKey()) {
+                    createIndex(tableName, col.getName() + "_idx", col.getName());
+                }
+            }
+            
+            logger.info("Tabla '{}' creada con {} columnas", tableName, columns.length);
+            return table;
+        } finally {
+            dbLock.writeLock().unlock();
         }
-        
-        logger.info("Tabla '{}' creada con {} columnas", tableName, columns.length);
-        return table;
     }
 
     /**
