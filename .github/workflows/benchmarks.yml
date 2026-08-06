@@ -1,0 +1,51 @@
+name: Benchmarks
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ develop ]
+    paths:
+      - 'deskdb-core/**'
+      - 'deskdb-benchmark/**'
+      - 'pom.xml'
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: maven
+    
+    - name: Build project with benchmarks
+      run: ./mvnw clean install -DskipTests -q
+    
+    - name: Run All Benchmarks
+      run: |
+        echo "=== Running All DeskDB Benchmarks ==="
+        java -jar deskdb-benchmark/target/benchmarks.jar > benchmark-full-log.txt 2>&1 || true
+        
+        # Extract only the benchmark results section (from "Benchmark" to "Run complete")
+        awk '/^Benchmark/,/Run complete/' benchmark-full-log.txt > benchmark-results.txt
+        
+        # If no results found, use full log as fallback
+        if [ ! -s benchmark-results.txt ]; then
+          cp benchmark-full-log.txt benchmark-results.txt
+        fi
+        
+        echo "=== Benchmark Results ==="
+        cat benchmark-results.txt
+    
+    - name: Upload benchmark results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: benchmark-results
+        path: benchmark-results.txt
+        retention-days: 30
