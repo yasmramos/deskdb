@@ -214,10 +214,10 @@ public class Transaction implements AutoCloseable {
                         WriteConcern batchWriteConcern = tx.writeConcern;
                         if (batchWriteConcern == WriteConcern.SAFE) {
                             wal.flush(); // Force fsync for SAFE mode
-                            logger.info(\"Batch commit completed with SAFE durability: {} transactions\", batch.size());
+                            logger.info("Batch commit completed with SAFE durability: {} transactions", batch.size());
                         } else {
                             // NORMAL or ASYNC: skip immediate flush for better performance
-                            logger.info(\"Batch commit completed with {} durability: {} transactions\", batchWriteConcern, batch.size());
+                            logger.info("Batch commit completed with {} durability: {} transactions", batchWriteConcern, batch.size());
                         }
                     } finally {
                         tx.lock.writeLock().unlock();
@@ -228,7 +228,7 @@ public class Transaction implements AutoCloseable {
                 if (tx.writeConcern == WriteConcern.SAFE) {
                     wal.flush();
                 }
-                logger.info(\"Batch commit completed: {} transactions\", batch.size());
+                logger.info("Batch commit completed: {} transactions", batch.size());
                 
             } catch (IOException e) {
                 logger.error("Failed to commit batch: {}", e.getMessage());
