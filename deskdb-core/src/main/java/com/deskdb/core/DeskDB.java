@@ -656,6 +656,7 @@ public class DeskDB implements AutoCloseable {
 
     /**
      * Saves the database to disk using atomic write for crash safety.
+     * Streams data directly to file to avoid OutOfMemoryError on large databases.
      * Public for ObjectStore access.
      * @throws IOException if there is an IO error
      */
@@ -669,71 +670,70 @@ public class DeskDB implements AutoCloseable {
         // Use write lock for exclusive access during save
         dbLock.writeLock().lock();
         try {
-            // First save all table data to the main file
-            ByteArrayOutputStream dataBaos = new ByteArrayOutputStream();
-            DataOutputStream dataOut = new DataOutputStream(dataBaos);
+            // ATOMIC WRITE: Stream directly to temp file (no ByteArrayOutputStream to avoid OOM)
+            Path tempPath = dbPath.resolveSibling(dbPath.getFileName().toString() + ".tmp");
             
-            // Save data from each table directly from ConcurrentHashMap to avoid OOM
-            for (Map.Entry<String, Table> entry : tables.entrySet()) {
-                Table table = entry.getValue();
-                Map<Long, Row> tableData = getTableData(table);
+            try (DataOutputStream out = new DataOutputStream(
+                    Files.newOutputStream(tempPath))) {
                 
-                // Write table name
-                dataOut.writeUTF(entry.getKey());
-                dataOut.writeInt(tableData.size());
+                // Save number of schemas
+                out.writeInt(schemas.size());
                 
-                // Write each row directly from internal map
-                for (Map.Entry<Long, Row> rowEntry : tableData.entrySet()) {
-                    Row row = rowEntry.getValue();
-                    dataOut.writeLong(row.getRowId());
-                    Map<String, Object> values = row.getValues();
-                    dataOut.writeInt(values.size());
-                    for (Map.Entry<String, Object> valEntry : values.entrySet()) {
-                        dataOut.writeUTF(valEntry.getKey());
-                        writeValue(dataOut, valEntry.getValue());
+                // Save each schema
+                for (Map.Entry<String, TableSchema> entry : schemas.entrySet()) {
+                    TableSchema schema = entry.getValue();
+                    out.writeUTF(entry.getKey());
+                    
+                    // Save schema columns
+                    List<Column> columns = schema.getColumnsList();
+                    out.writeInt(columns.size());
+                    for (Column col : columns) {
+                        out.writeUTF(col.getName());
+                        out.writeUTF(col.getType().name());
+                        out.writeBoolean(col.isPrimaryKey());
+                        out.writeBoolean(col.isNotNull());
+                    }
+                }
+                
+                // Save data from each table directly to file (streaming, no intermediate buffer)
+                for (Map.Entry<String, Table> entry : tables.entrySet()) {
+                    Table table = entry.getValue();
+                    Map<Long, Row> tableData = getTableData(table);
+                    
+                    // Write table marker
+                    out.writeUTF(entry.getKey());
+                    out.writeInt(tableData.size());
+                    
+                    // Write each row directly from internal map
+                    for (Map.Entry<Long, Row> rowEntry : tableData.entrySet()) {
+                        Row row = rowEntry.getValue();
+                        out.writeLong(row.getRowId());
+                        Map<String, Object> values = row.getValues();
+                        out.writeInt(values.size());
+                        for (Map.Entry<String, Object> valEntry : values.entrySet()) {
+                            out.writeUTF(valEntry.getKey());
+                            writeValue(out, valEntry.getValue());
+                        }
                     }
                 }
             }
-            dataOut.close();
-            byte[] dataContent = dataBaos.toByteArray();
             
-            // Now save schemas + concatenated data
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            DataOutputStream out = new DataOutputStream(baos);
-            
-            // Save number of schemas
-            out.writeInt(schemas.size());
-            
-            // Save each schema
-            for (Map.Entry<String, TableSchema> entry : schemas.entrySet()) {
-                TableSchema schema = entry.getValue();
-                out.writeUTF(entry.getKey());
-                
-                // Save schema columns
-                List<Column> columns = schema.getColumnsList();
-                out.writeInt(columns.size());
-                for (Column col : columns) {
-                    out.writeUTF(col.getName());
-                    out.writeUTF(col.getType().name());
-                    out.writeBoolean(col.isPrimaryKey());
-                    out.writeBoolean(col.isNotNull());
-                }
-            }
-            
-            // Save data length and content
-            out.writeInt(dataContent.length);
-            out.write(dataContent);
-            
-            out.close();
-            byte[] content = baos.toByteArray();
-            
-            // ATOMIC WRITE: Write to temp file first, then atomically replace
-            Path tempPath = dbPath.resolveSibling(dbPath.getFileName().toString() + ".tmp");
-            Files.write(tempPath, content);
+            // Atomically replace the original file with the temp file
             Files.move(tempPath, dbPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING, 
                       java.nio.file.StandardCopyOption.ATOMIC_MOVE);
             
             logger.debug("Database saved atomically to {}", dbPath);
+        } catch (IOException e) {
+            // Clean up temp file if it exists
+            Path tempPath = dbPath.resolveSibling(dbPath.getFileName().toString() + ".tmp");
+            if (Files.exists(tempPath)) {
+                try {
+                    Files.delete(tempPath);
+                } catch (IOException ex) {
+                    logger.warn("Failed to delete temp file after error", ex);
+                }
+            }
+            throw e;
         } finally {
             dbLock.writeLock().unlock();
         }
