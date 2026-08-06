@@ -42,6 +42,7 @@ public class DeskDB implements AutoCloseable {
     private boolean closed = false;
     private final AtomicInteger transactionCounter = new AtomicInteger(0);
     private final ReentrantReadWriteLock dbLock = new ReentrantReadWriteLock();
+    private final boolean inMemoryOnly; // Flag to indicate if this is an in-memory only database
 
     public String getFilePath() {
         return dbPath.toString();
@@ -50,11 +51,15 @@ public class DeskDB implements AutoCloseable {
     private DeskDB(Path dbPath) throws IOException {
         this.dbPath = dbPath;
         this.tables = new ConcurrentHashMap<>();
-        this.schemas = new HashMap<>();
+        this.schemas = new ConcurrentHashMap<>(); // Fix: Use ConcurrentHashMap for thread safety
         this.indexes = new ConcurrentHashMap<>();
+        this.inMemoryOnly = false;
         
         // Determinar ruta del WAL (mismo directorio que el archivo .deskdb)
         Path walPath = dbPath.resolveSibling(dbPath.getFileName().toString() + ".wal");
+        
+        // Initialize WAL FIRST before recovery to avoid NPE
+        this.wal = Wal.open(walPath);
         
         if (Files.exists(dbPath)) {
             loadFromFile();
@@ -77,9 +82,6 @@ public class DeskDB implements AutoCloseable {
         // Initialize ObjectStore AFTER loading data to ensure proper order
         this.objectStore = new ObjectStore(this, false);
         this.objectStore.initialize();  // Explicit initialization after data load
-        
-        // Inicializar WAL
-        this.wal = Wal.open(walPath);
         
         logger.info("DeskDB opened at {} with WAL at {}", dbPath.toAbsolutePath(), walPath.toAbsolutePath());
     }
@@ -106,8 +108,9 @@ public class DeskDB implements AutoCloseable {
     private DeskDB(Path dbPath, boolean inMemoryOnly) throws IOException {
         this.dbPath = dbPath;
         this.tables = new ConcurrentHashMap<>();
-        this.schemas = new HashMap<>();
+        this.schemas = new ConcurrentHashMap<>();
         this.indexes = new ConcurrentHashMap<>();
+        this.inMemoryOnly = inMemoryOnly;
         this.objectStore = new ObjectStore(this, true); // Initialize ObjectStore with in-memory flag
         this.wal = null; // No WAL for in-memory mode
         
@@ -227,9 +230,8 @@ public class DeskDB implements AutoCloseable {
      */
     public void close() throws IOException {
         if (!closed) {
-            // Only save to file if dbPath is a file, not a directory
-            // In normal operation, dbPath is a directory and data is stored in .data files
-            if (java.nio.file.Files.isRegularFile(dbPath)) {
+            // Only save to file if not in-memory-only mode and dbPath is a regular file
+            if (!inMemoryOnly && java.nio.file.Files.isRegularFile(dbPath)) {
                 saveToFile();
             }
             
@@ -653,11 +655,17 @@ public class DeskDB implements AutoCloseable {
     }
 
     /**
-     * Saves the database to disk.
+     * Saves the database to disk using atomic write for crash safety.
      * Public for ObjectStore access.
      * @throws IOException if there is an IO error
      */
     public void saveToFile() throws IOException {
+        // Don't save if in-memory-only mode
+        if (inMemoryOnly) {
+            logger.debug("Skipping save for in-memory database");
+            return;
+        }
+        
         // Use write lock for exclusive access during save
         dbLock.writeLock().lock();
         try {
@@ -718,8 +726,14 @@ public class DeskDB implements AutoCloseable {
             
             out.close();
             byte[] content = baos.toByteArray();
-            Files.write(dbPath, content);
-            logger.debug("Database saved to {}", dbPath);
+            
+            // ATOMIC WRITE: Write to temp file first, then atomically replace
+            Path tempPath = dbPath.resolveSibling(dbPath.getFileName().toString() + ".tmp");
+            Files.write(tempPath, content);
+            Files.move(tempPath, dbPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING, 
+                      java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            
+            logger.debug("Database saved atomically to {}", dbPath);
         } finally {
             dbLock.writeLock().unlock();
         }
