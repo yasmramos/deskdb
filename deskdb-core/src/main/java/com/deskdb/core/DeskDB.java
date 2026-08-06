@@ -609,9 +609,41 @@ public class DeskDB implements AutoCloseable {
                         DataType dataType = DataType.valueOf(in.readUTF());
                         boolean primaryKey = in.readBoolean();
                         boolean notNull = in.readBoolean();
-                        columns[j] = new Column(colName, dataType);
-                        if (primaryKey) columns[j].setPrimaryKey(true);
-                        if (notNull) columns[j].setNotNull(true);
+                        // Read remaining metadata for full atomic deserialization
+                        boolean unique = in.available() > 0 && in.readBoolean();
+                        Object defaultValue = null;
+                        boolean hasDefault = in.available() > 0 && in.readBoolean();
+                        if (hasDefault) {
+                            // Read default value using BinarySerializer logic
+                            // For backward compatibility, we skip complex default values
+                            // Only primitive types and String are supported as defaults
+                            byte typeCode = in.readByte();
+                            if (typeCode >= 0) { // Not NULL
+                                switch (typeCode) {
+                                    case 0: // STRING
+                                        defaultValue = in.readUTF();
+                                        break;
+                                    case 1: // INTEGER
+                                        defaultValue = in.readInt();
+                                        break;
+                                    case 2: // LONG
+                                        defaultValue = in.readLong();
+                                        break;
+                                    case 3: // DOUBLE
+                                        defaultValue = in.readDouble();
+                                        break;
+                                    case 4: // BOOLEAN
+                                        defaultValue = in.readBoolean();
+                                        break;
+                                    default:
+                                        // Skip unsupported default value types for backward compatibility
+                                        logger.warn("Skipping unsupported default value type: {}", typeCode);
+                                        break;
+                                }
+                            }
+                        }
+                        // Use atomic deserialization method to ensure immutability
+                        columns[j] = Column.deserialize(colName, dataType, primaryKey, notNull, unique, defaultValue);
                     }
                     TableSchema schema = new TableSchema(tableName, List.of(columns));
                     catalogManager.registerSchema(schema);
@@ -745,6 +777,16 @@ public class DeskDB implements AutoCloseable {
                         out.writeUTF(col.getType().name());
                         out.writeBoolean(col.isPrimaryKey());
                         out.writeBoolean(col.isNotNull());
+                        out.writeBoolean(col.isUnique());
+                        
+                        // Save default value
+                        Object defaultValue = col.getDefaultValue();
+                        if (defaultValue != null) {
+                            out.writeBoolean(true);
+                            writeValue(out, defaultValue);
+                        } else {
+                            out.writeBoolean(false);
+                        }
                     }
                 }
                 

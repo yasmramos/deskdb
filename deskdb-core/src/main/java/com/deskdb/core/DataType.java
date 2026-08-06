@@ -70,4 +70,40 @@ public enum DataType {
     public boolean isVariableLength() {
         return getFixedSize() == -1;
     }
+    
+    /**
+     * Verifica si una clase Java es compatible con este tipo de dato.
+     * @param clazz la clase a verificar
+     * @return true si la clase es compatible con este DataType
+     */
+    public boolean isCompatible(Class<?> clazz) {
+        if (clazz == null) {
+            return true; // null es compatible con cualquier tipo
+        }
+        
+        switch (this) {
+            case STRING:
+            case JSON:
+                return String.class.isAssignableFrom(clazz);
+            case INT:
+                return Integer.class.isAssignableFrom(clazz) || int.class == clazz;
+            case LONG:
+                return Long.class.isAssignableFrom(clazz) || long.class == clazz;
+            case DOUBLE:
+                return Double.class.isAssignableFrom(clazz) || double.class == clazz;
+            case DECIMAL:
+                return java.math.BigDecimal.class.isAssignableFrom(clazz);
+            case BOOLEAN:
+                return Boolean.class.isAssignableFrom(clazz) || boolean.class == clazz;
+            case DATE:
+                return java.util.Date.class.isAssignableFrom(clazz);
+            case TIMESTAMP:
+                return java.sql.Timestamp.class.isAssignableFrom(clazz) ||
+                       java.util.Date.class.isAssignableFrom(clazz);
+            case BLOB:
+                return byte[].class == clazz;
+            default:
+                return false;
+        }
+    }
 }

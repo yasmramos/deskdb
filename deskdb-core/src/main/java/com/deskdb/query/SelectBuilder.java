@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.Collections;
-import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 /**
  * Builder for constructing and executing SELECT queries.
@@ -117,7 +117,7 @@ public class SelectBuilder {
      * @param predicate a function that evaluates conditions against a Row
      * @return this SelectBuilder for method chaining
      */
-    public SelectBuilder where(Consumer<com.deskdb.core.Row> predicate) {
+    public SelectBuilder where(Predicate<com.deskdb.core.Row> predicate) {
         // Create a special filter that evaluates the predicate against each row
         Filter lambdaFilter = new Filter(predicate);
         this.filters.add(lambdaFilter);

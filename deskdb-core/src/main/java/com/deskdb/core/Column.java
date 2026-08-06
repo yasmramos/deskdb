@@ -11,9 +11,38 @@ public class Column {
     private boolean unique;
     private Object defaultValue;
 
-    public Column(String name, DataType type) {
+    // Private constructor for full deserialization to ensure atomicity and immutability
+    private Column(String name, DataType type, boolean primaryKey, boolean notNull, 
+                   boolean unique, Object defaultValue) {
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("Column name cannot be null or empty");
+        }
+        if (type == null) {
+            throw new IllegalArgumentException("Column type cannot be null");
+        }
         this.name = name;
         this.type = type;
+        this.primaryKey = primaryKey;
+        this.notNull = notNull;
+        this.unique = unique;
+        this.defaultValue = defaultValue;
+    }
+
+    public Column(String name, DataType type) {
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("Column name cannot be null or empty");
+        }
+        if (type == null) {
+            throw new IllegalArgumentException("Column type cannot be null");
+        }
+        this.name = name;
+        this.type = type;
+    }
+
+    // Package-private method for deserialization - creates immutable instance with full state
+    static Column deserialize(String name, DataType type, boolean primaryKey, boolean notNull, 
+                              boolean unique, Object defaultValue) {
+        return new Column(name, type, primaryKey, notNull, unique, defaultValue);
     }
 
     public Column primaryKey() {
@@ -32,6 +61,10 @@ public class Column {
     }
 
     public Column defaultValue(Object value) {
+        if (value != null && !this.type.isCompatible(value.getClass())) {
+            throw new IllegalArgumentException("Default value type mismatch for column " + name + 
+                ": expected " + this.type + " but got " + value.getClass().getSimpleName());
+        }
         this.defaultValue = value;
         return this;
     }
@@ -44,7 +77,6 @@ public class Column {
     public boolean isUnique() { return unique; }
     public Object getDefaultValue() { return defaultValue; }
     
-    // Setters for deserialization
-    void setPrimaryKey(boolean primaryKey) { this.primaryKey = primaryKey; }
-    void setNotNull(boolean notNull) { this.notNull = notNull; }
+    // Removed mutable setters to ensure thread-safety and immutability after construction
+    // Deserialization now uses the static deserialize() method for atomic creation
 }
