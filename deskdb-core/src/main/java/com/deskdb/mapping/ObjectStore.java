@@ -37,7 +37,7 @@ import java.util.zip.GZIPOutputStream;
  */
 public class ObjectStore {
 
-    private static final String INTERNAL_TABLE_NAME = "_obj_store";
+    private static final String INTERNAL_TABLE_NAME = "sys:_obj_store";
     private static final int COMPRESSION_THRESHOLD = 1024; // 1KB
     
     // In-memory cache with versioning for transaction consistency
