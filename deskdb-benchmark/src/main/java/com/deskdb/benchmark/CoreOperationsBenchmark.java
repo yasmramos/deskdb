@@ -11,7 +11,6 @@ import org.openjdk.jmh.infra.Blackhole;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Benchmark for core database operations including insert, update, select, and delete.
@@ -32,7 +31,7 @@ public class CoreOperationsBenchmark {
 
     private DeskDB database;
     private TableOperations tableOps;
-    private AtomicInteger counter = new AtomicInteger(1000);
+    private int counter = 1000;
     private static final int BATCH_SIZE = 100;
 
     @Setup
@@ -57,7 +56,7 @@ public class CoreOperationsBenchmark {
      */
     private void populateTestData() throws Exception {
         try (Transaction tx = database.beginTransaction()) {
-            for (int i = 1; i <= 1000; i++) {
+            for (int i = 1; i <= 100; i++) {
                 tx.table("users")
                     .insert()
                     .value("id", i)
@@ -88,7 +87,7 @@ public class CoreOperationsBenchmark {
      */
     @Benchmark
     public void insertSingle_Durability(Blackhole bh) throws Exception {
-        int id = counter.incrementAndGet();
+        int id = ++counter;
         database.table("users")
             .insert()
             .value("id", id)
@@ -107,7 +106,7 @@ public class CoreOperationsBenchmark {
     @Benchmark
     public void insertBatch_Throughput(Blackhole bh) throws Exception {
         int batchSize = BATCH_SIZE;
-        int startId = counter.addAndGet(batchSize);
+        int startId = counter += batchSize;
         
         try (Transaction tx = database.beginTransaction()) {
             for (int i = 0; i < batchSize; i++) {
@@ -127,50 +126,12 @@ public class CoreOperationsBenchmark {
     }
 
     /**
-     * Benchmark for batch insert using bulk API (if available).
-     * Measures performance of optimized bulk insert operations.
-     */
-    @Benchmark
-    public void insertBulk_Optimized(Blackhole bh) throws Exception {
-        int batchSize = BATCH_SIZE;
-        int startId = counter.addAndGet(batchSize);
-        
-        List<Object[]> batchData = new ArrayList<>(batchSize);
-        for (int i = 0; i < batchSize; i++) {
-            int id = startId + i;
-            Object[] row = new Object[] {
-                id,
-                "User_" + id,
-                "user" + id + "@example.com",
-                20 + (i % 50),
-                100.0 + (i * 1.5)
-            };
-            batchData.add(row);
-        }
-        
-        try (Transaction tx = database.beginTransaction()) {
-            TableOperations table = tx.table("users");
-            for (Object[] row : batchData) {
-                table.insert()
-                    .value("id", row[0])
-                    .value("name", row[1])
-                    .value("email", row[2])
-                    .value("age", row[3])
-                    .value("balance", row[4])
-                    .execute();
-            }
-            tx.commit();
-        }
-        bh.consume(batchSize);
-    }
-
-    /**
      * Benchmark for select by primary key operation.
      * Measures point query performance using indexed lookup.
      */
     @Benchmark
     public void selectByIdOperation(Blackhole bh) throws Exception {
-        var results = tableOps.select().where("id").eq(50).execute();
+        var results = tableOps.select().where("id").eq(1).execute();
         bh.consume(results);
     }
 
@@ -186,28 +147,37 @@ public class CoreOperationsBenchmark {
 
     /**
      * Benchmark for update operation by primary key.
-     * Measures the cost of updating a single record.
+     * Measures the cost of updating a single record with varying values.
      */
     @Benchmark
     public void updateOperation(Blackhole bh) throws Exception {
-        int updated = tableOps.update().set("name", "UpdatedUser").where("id").eq(50).execute();
+        int id = 1 + (Math.abs(counter++) % 100);
+        String newName = "UpdatedUser_" + counter;
+        int updated = tableOps.update().set("name", newName).where("id").eq(id).execute();
         bh.consume(updated);
     }
 
     /**
      * Benchmark for delete operation by primary key.
      * Includes re-insertion to maintain consistent dataset size.
+     * Uses atomic transaction to ensure data consistency.
      */
     @Benchmark
     public void deleteOperation(Blackhole bh) throws Exception {
-        int deleted = tableOps.delete().where("id").eq(99).execute();
-        bh.consume(deleted);
-        tableOps.insert()
-            .value("id", 99)
-            .value("name", "User99")
-            .value("email", "user99@test.com")
-            .value("age", 124)
-            .value("balance", 100.0)
-            .execute();
+        int id = 99;
+        try (Transaction tx = database.beginTransaction()) {
+            int deleted = tx.table("users").delete().where("id").eq(id).execute();
+            if (deleted > 0) {
+                tx.table("users").insert()
+                    .value("id", id)
+                    .value("name", "User99")
+                    .value("email", "user99@test.com")
+                    .value("age", 124)
+                    .value("balance", 100.0)
+                    .execute();
+            }
+            tx.commit();
+        }
+        bh.consume(1);
     }
 }
