@@ -20,6 +20,7 @@ import com.deskdb.core.Transaction;
 import com.deskdb.core.Row;
 import com.deskdb.core.Column;
 import com.deskdb.core.DataType;
+import com.deskdb.core.TableOperations;
 
 /**
  * Benchmark comparing DeskDB against popular embedded Java databases:
@@ -256,9 +257,10 @@ public class EmbeddedDatabaseBenchmark {
     public void insertSingle_H2() throws SQLException {
         try (PreparedStatement ps = h2Conn.prepareStatement(
                 "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            ps.setInt(1, 1);
-            ps.setString(2, "Test User");
-            ps.setString(3, "test@example.com");
+            int id = getNextId();
+            ps.setInt(1, id);
+            ps.setString(2, "Test User " + id);
+            ps.setString(3, "test" + id + "@example.com");
             ps.setInt(4, 30);
             ps.setDouble(5, 1000.50);
             ps.executeUpdate();
@@ -269,9 +271,10 @@ public class EmbeddedDatabaseBenchmark {
     public void insertSingle_SQLite() throws SQLException {
         try (PreparedStatement ps = sqliteConn.prepareStatement(
                 "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            ps.setInt(1, 1);
-            ps.setString(2, "Test User");
-            ps.setString(3, "test@example.com");
+            int id = getNextId();
+            ps.setInt(1, id);
+            ps.setString(2, "Test User " + id);
+            ps.setString(3, "test" + id + "@example.com");
             ps.setInt(4, 30);
             ps.setDouble(5, 1000.50);
             ps.executeUpdate();
@@ -282,9 +285,10 @@ public class EmbeddedDatabaseBenchmark {
     public void insertSingle_HSQLDB() throws SQLException {
         try (PreparedStatement ps = hsqldbConn.prepareStatement(
                 "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            ps.setInt(1, 1);
-            ps.setString(2, "Test User");
-            ps.setString(3, "test@example.com");
+            int id = getNextId();
+            ps.setInt(1, id);
+            ps.setString(2, "Test User " + id);
+            ps.setString(3, "test" + id + "@example.com");
             ps.setInt(4, 30);
             ps.setDouble(5, 1000.50);
             ps.executeUpdate();
@@ -294,10 +298,10 @@ public class EmbeddedDatabaseBenchmark {
     @Benchmark
     public void insertBatch_DeskDB() {
         try (Transaction tx = deskDB.beginTransaction()) {
+            TableOperations table = tx.table("users");
             for (int i = 0; i < BATCH_SIZE; i++) {
                 int id = getNextId();
-                deskDB.table("users")
-                    .insert()
+                table.insert()
                     .value("id", id)
                     .value("name", "User " + id)
                     .value("email", "user" + id + "@example.com")
@@ -376,10 +380,11 @@ public class EmbeddedDatabaseBenchmark {
     @Benchmark
     public void readPoint_DeskDB() {
         try {
-            // First insert a record
+            // First insert a record with unique ID
+            int id = getNextId();
             deskDB.table("users")
                 .insert()
-                .value("id", 999)
+                .value("id", id)
                 .value("name", "Query Test")
                 .value("email", "query@example.com")
                 .value("age", 25)
@@ -389,7 +394,7 @@ public class EmbeddedDatabaseBenchmark {
             List<Row> results = deskDB.table("users")
                 .select()
                 .where("id")
-                .isEqualTo(999)
+                .isEqualTo(id)
                 .execute();
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -398,10 +403,11 @@ public class EmbeddedDatabaseBenchmark {
     
     @Benchmark
     public void readPoint_H2() throws SQLException {
-        // First insert a record
+        // First insert a record with unique ID
+        int id = getNextId();
         try (PreparedStatement ps = h2Conn.prepareStatement(
                 "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            ps.setInt(1, 999);
+            ps.setInt(1, id);
             ps.setString(2, "Query Test");
             ps.setString(3, "query@example.com");
             ps.setInt(4, 25);
@@ -411,7 +417,7 @@ public class EmbeddedDatabaseBenchmark {
         
         try (PreparedStatement ps = h2Conn.prepareStatement(
                 "SELECT * FROM users WHERE id = ?")) {
-            ps.setInt(1, 999);
+            ps.setInt(1, id);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     // Consume result
@@ -422,10 +428,11 @@ public class EmbeddedDatabaseBenchmark {
     
     @Benchmark
     public void readPoint_SQLite() throws SQLException {
-        // First insert a record
+        // First insert a record with unique ID
+        int id = getNextId();
         try (PreparedStatement ps = sqliteConn.prepareStatement(
                 "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            ps.setInt(1, 999);
+            ps.setInt(1, id);
             ps.setString(2, "Query Test");
             ps.setString(3, "query@example.com");
             ps.setInt(4, 25);
@@ -435,7 +442,7 @@ public class EmbeddedDatabaseBenchmark {
         
         try (PreparedStatement ps = sqliteConn.prepareStatement(
                 "SELECT * FROM users WHERE id = ?")) {
-            ps.setInt(1, 999);
+            ps.setInt(1, id);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     // Consume result
@@ -446,10 +453,11 @@ public class EmbeddedDatabaseBenchmark {
     
     @Benchmark
     public void readPoint_HSQLDB() throws SQLException {
-        // First insert a record
+        // First insert a record with unique ID
+        int id = getNextId();
         try (PreparedStatement ps = hsqldbConn.prepareStatement(
                 "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            ps.setInt(1, 999);
+            ps.setInt(1, id);
             ps.setString(2, "Query Test");
             ps.setString(3, "query@example.com");
             ps.setInt(4, 25);
@@ -459,7 +467,7 @@ public class EmbeddedDatabaseBenchmark {
         
         try (PreparedStatement ps = hsqldbConn.prepareStatement(
                 "SELECT * FROM users WHERE id = ?")) {
-            ps.setInt(1, 999);
+            ps.setInt(1, id);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     // Consume result
@@ -471,12 +479,13 @@ public class EmbeddedDatabaseBenchmark {
     @Benchmark
     public void readRange_DeskDB() {
         try {
-            // Insert test data
+            // Insert test data with unique IDs per iteration
+            int baseId = getNextId();
             try (Transaction tx = deskDB.beginTransaction()) {
+                TableOperations table = tx.table("users");
                 for (int i = 0; i < 100; i++) {
-                    deskDB.table("users")
-                        .insert()
-                        .value("id", i)
+                    table.insert()
+                        .value("id", baseId + i)
                         .value("name", "User " + i)
                         .value("email", "user" + i + "@example.com")
                         .value("age", 20 + (i % 50))
@@ -601,10 +610,11 @@ public class EmbeddedDatabaseBenchmark {
     @Benchmark
     public void update_DeskDB() {
         try {
-            // Insert first
+            // Insert first with unique ID
+            int id = getNextId();
             deskDB.table("users")
                 .insert()
-                .value("id", 888)
+                .value("id", id)
                 .value("name", "Update Test")
                 .value("email", "update@example.com")
                 .value("age", 25)
@@ -616,7 +626,7 @@ public class EmbeddedDatabaseBenchmark {
                 .update()
                 .set("balance", 200.0)
                 .where("id")
-                .isEqualTo(888)
+                .isEqualTo(id)
                 .execute();
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -625,10 +635,11 @@ public class EmbeddedDatabaseBenchmark {
     
     @Benchmark
     public void update_H2() throws SQLException {
-        // Insert first
+        // Insert first with unique ID
+        int id = getNextId();
         try (PreparedStatement ps = h2Conn.prepareStatement(
                 "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            ps.setInt(1, 888);
+            ps.setInt(1, id);
             ps.setString(2, "Update Test");
             ps.setString(3, "update@example.com");
             ps.setInt(4, 25);
@@ -640,17 +651,18 @@ public class EmbeddedDatabaseBenchmark {
         try (PreparedStatement ps = h2Conn.prepareStatement(
                 "UPDATE users SET balance = ? WHERE id = ?")) {
             ps.setDouble(1, 200.0);
-            ps.setInt(2, 888);
+            ps.setInt(2, id);
             ps.executeUpdate();
         }
     }
     
     @Benchmark
     public void update_SQLite() throws SQLException {
-        // Insert first
+        // Insert first with unique ID
+        int id = getNextId();
         try (PreparedStatement ps = sqliteConn.prepareStatement(
                 "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            ps.setInt(1, 888);
+            ps.setInt(1, id);
             ps.setString(2, "Update Test");
             ps.setString(3, "update@example.com");
             ps.setInt(4, 25);
@@ -662,17 +674,18 @@ public class EmbeddedDatabaseBenchmark {
         try (PreparedStatement ps = sqliteConn.prepareStatement(
                 "UPDATE users SET balance = ? WHERE id = ?")) {
             ps.setDouble(1, 200.0);
-            ps.setInt(2, 888);
+            ps.setInt(2, id);
             ps.executeUpdate();
         }
     }
     
     @Benchmark
     public void update_HSQLDB() throws SQLException {
-        // Insert first
+        // Insert first with unique ID
+        int id = getNextId();
         try (PreparedStatement ps = hsqldbConn.prepareStatement(
                 "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            ps.setInt(1, 888);
+            ps.setInt(1, id);
             ps.setString(2, "Update Test");
             ps.setString(3, "update@example.com");
             ps.setInt(4, 25);
@@ -684,7 +697,7 @@ public class EmbeddedDatabaseBenchmark {
         try (PreparedStatement ps = hsqldbConn.prepareStatement(
                 "UPDATE users SET balance = ? WHERE id = ?")) {
             ps.setDouble(1, 200.0);
-            ps.setInt(2, 888);
+            ps.setInt(2, id);
             ps.executeUpdate();
         }
     }
@@ -694,10 +707,11 @@ public class EmbeddedDatabaseBenchmark {
     @Benchmark
     public void delete_DeskDB() {
         try {
-            // Insert first
+            // Insert first with unique ID
+            int id = getNextId();
             deskDB.table("users")
                 .insert()
-                .value("id", 777)
+                .value("id", id)
                 .value("name", "Delete Test")
                 .value("email", "delete@example.com")
                 .value("age", 25)
@@ -708,7 +722,7 @@ public class EmbeddedDatabaseBenchmark {
             deskDB.table("users")
                 .delete()
                 .where("id")
-                .isEqualTo(777)
+                .isEqualTo(id)
                 .execute();
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -717,10 +731,11 @@ public class EmbeddedDatabaseBenchmark {
     
     @Benchmark
     public void delete_H2() throws SQLException {
-        // Insert first
+        // Insert first with unique ID
+        int id = getNextId();
         try (PreparedStatement ps = h2Conn.prepareStatement(
                 "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            ps.setInt(1, 777);
+            ps.setInt(1, id);
             ps.setString(2, "Delete Test");
             ps.setString(3, "delete@example.com");
             ps.setInt(4, 25);
@@ -731,17 +746,18 @@ public class EmbeddedDatabaseBenchmark {
         // Then delete
         try (PreparedStatement ps = h2Conn.prepareStatement(
                 "DELETE FROM users WHERE id = ?")) {
-            ps.setInt(1, 777);
+            ps.setInt(1, id);
             ps.executeUpdate();
         }
     }
     
     @Benchmark
     public void delete_SQLite() throws SQLException {
-        // Insert first
+        // Insert first with unique ID
+        int id = getNextId();
         try (PreparedStatement ps = sqliteConn.prepareStatement(
                 "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            ps.setInt(1, 777);
+            ps.setInt(1, id);
             ps.setString(2, "Delete Test");
             ps.setString(3, "delete@example.com");
             ps.setInt(4, 25);
@@ -752,17 +768,18 @@ public class EmbeddedDatabaseBenchmark {
         // Then delete
         try (PreparedStatement ps = sqliteConn.prepareStatement(
                 "DELETE FROM users WHERE id = ?")) {
-            ps.setInt(1, 777);
+            ps.setInt(1, id);
             ps.executeUpdate();
         }
     }
     
     @Benchmark
     public void delete_HSQLDB() throws SQLException {
-        // Insert first
+        // Insert first with unique ID
+        int id = getNextId();
         try (PreparedStatement ps = hsqldbConn.prepareStatement(
                 "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            ps.setInt(1, 777);
+            ps.setInt(1, id);
             ps.setString(2, "Delete Test");
             ps.setString(3, "delete@example.com");
             ps.setInt(4, 25);
@@ -773,7 +790,7 @@ public class EmbeddedDatabaseBenchmark {
         // Then delete
         try (PreparedStatement ps = hsqldbConn.prepareStatement(
                 "DELETE FROM users WHERE id = ?")) {
-            ps.setInt(1, 777);
+            ps.setInt(1, id);
             ps.executeUpdate();
         }
     }
