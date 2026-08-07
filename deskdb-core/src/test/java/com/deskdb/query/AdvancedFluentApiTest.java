@@ -88,7 +88,7 @@ public class AdvancedFluentApiTest {
     public void testSelectWithLambdaPredicateSimple() throws Exception {
         List<Row> results = db.table("users")
             .select()
-            .where(user -> user.field("age").gt(30))
+            .where(user -> user.field("age").gt(30).getValue())
             .execute();
 
         assertNotNull(results);
@@ -105,9 +105,18 @@ public class AdvancedFluentApiTest {
     public void testSelectWithLambdaPredicateMultipleConditions() throws Exception {
         List<Row> results = db.table("users")
             .select()
-            .where(user -> user
-                .field("age").gt(25)
-                .and("status").eq("active"))
+            .where(user -> {
+                var cond = user.field("age").gt(25).and("status").eq("active");
+                return cond.getValue();
+            })
+            .where(user -> {
+                var cond = user.field("age").gt(25).and("status").eq("active");
+                return cond.getValue();
+            })
+            .where(user -> {
+                var cond = user.field("age").gt(25).and("status").eq("active");
+                return cond.getValue();
+            })
             .execute();
 
         assertNotNull(results);
@@ -127,9 +136,18 @@ public class AdvancedFluentApiTest {
     public void testSelectWithLambdaPredicateComplex() throws Exception {
         List<Row> results = db.table("users")
             .select()
-            .where(user -> user
-                .field("age").between(25, 35)
-                .and("status").eq("active"))
+            .where(user -> {
+                var cond = user.field("age").between(25, 35).and("status").eq("active");
+                return cond.getValue();
+            })
+            .where(user -> {
+                var cond = user.field("age").between(25, 35).and("status").eq("active");
+                return cond.getValue();
+            })
+            .where(user -> {
+                var cond = user.field("age").between(25, 35).and("status").eq("active");
+                return cond.getValue();
+            })
             .orderBy("age")
             .execute();
 
@@ -150,7 +168,7 @@ public class AdvancedFluentApiTest {
     public void testSelectWithLambdaPredicateLessThan() throws Exception {
         List<Row> results = db.table("users")
             .select()
-            .where(user -> user.field("age").lt(30))
+            .where(user -> { var cond = user.field("age").lt(30); return cond.getValue(); })
             .execute();
 
         assertNotNull(results);
@@ -168,7 +186,7 @@ public class AdvancedFluentApiTest {
     public void testSelectWithLambdaPredicateNotEquals() throws Exception {
         List<Row> results = db.table("users")
             .select()
-            .where(user -> user.field("status").ne("active"))
+            .where(user -> { var cond = user.field("status").ne("active"); return cond.getValue(); })
             .execute();
 
         assertNotNull(results);
@@ -186,7 +204,7 @@ public class AdvancedFluentApiTest {
     public void testSelectWithLambdaPredicateGte() throws Exception {
         List<Row> results = db.table("users")
             .select()
-            .where(user -> user.field("age").gte(30))
+            .where(user -> { var cond = user.field("age").gte(30); return cond.getValue(); })
             .orderByDesc("age")
             .execute();
 
@@ -207,7 +225,7 @@ public class AdvancedFluentApiTest {
     public void testSelectWithLambdaPredicateLte() throws Exception {
         List<Row> results = db.table("users")
             .select()
-            .where(user -> user.field("age").lte(28))
+            .where(user -> { var cond = user.field("age").lte(28); return cond.getValue(); })
             .execute();
 
         assertNotNull(results);
@@ -225,7 +243,7 @@ public class AdvancedFluentApiTest {
     public void testSelectWithPaginationAndLambda() throws Exception {
         List<Row> results = db.table("users")
             .select()
-            .where(user -> user.field("age").gt(20))
+            .where(user -> { var cond = user.field("age").gt(20); return cond.getValue(); })
             .orderBy("name")
             .limit(2)
             .offset(1)
@@ -256,7 +274,7 @@ public class AdvancedFluentApiTest {
         // Verify the inserted data
         List<Row> results = db.table("users")
             .select()
-            .where(user -> user.field("id").eq(100))
+            .where(user -> { var cond = user.field("id").eq(100); return cond.getValue(); })
             .execute();
         
         assertEquals(1, results.size());
@@ -282,7 +300,7 @@ public class AdvancedFluentApiTest {
         // Delete using lambda predicate
         db.table("users")
             .delete()
-            .where(user -> user.field("id").eq(200))
+            .where(user -> { var cond = user.field("id").eq(200); return cond.getValue(); })
             .execute();
         
         int finalCount = db.table("users").select().execute().size();
@@ -291,7 +309,7 @@ public class AdvancedFluentApiTest {
         // Verify deletion
         List<Row> results = db.table("users")
             .select()
-            .where(user -> user.field("id").eq(200))
+            .where(user -> { var cond = user.field("id").eq(200); return cond.getValue(); })
             .execute();
         
         assertTrue(results.isEmpty());
@@ -304,13 +322,13 @@ public class AdvancedFluentApiTest {
         db.table("users")
             .update()
             .set("status", "premium")
-            .where(user -> user.field("age").gt(40))
+            .where(user -> { var cond = user.field("age").gt(40); return cond.getValue(); })
             .execute();
         
         // Verify update
         List<Row> results = db.table("users")
             .select()
-            .where(user -> user.field("age").gt(40))
+            .where(user -> { var cond = user.field("age").gt(40); return cond.getValue(); })
             .execute();
         
         assertTrue(results.size() > 0);

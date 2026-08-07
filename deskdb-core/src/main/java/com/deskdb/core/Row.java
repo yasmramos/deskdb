@@ -1,6 +1,7 @@
 package com.deskdb.core;
 
 import java.util.*;
+import java.util.function.Predicate;
 
 /**
  * Representa una fila de datos en una tabla.
@@ -55,8 +56,9 @@ public class Row {
      * Special FieldCondition implementation that evaluates filters directly against a Row.
      * Used for lambda predicate evaluation in where() clauses.
      * Accumulates all conditions and evaluates them together.
+     * Implements Predicate<Row> for direct use in lambda expressions.
      */
-    public class LambdaFieldCondition {
+    public class LambdaFieldCondition implements Predicate<com.deskdb.core.Row> {
         protected final Row row;
         protected final String fieldName;
         private boolean hasFailed = false;
@@ -123,6 +125,11 @@ public class Row {
          * This allows LambdaFieldCondition to be used as a Predicate<Row>.
          * @return true if no conditions have failed, false otherwise
          */
+        @Override
+        public boolean test(com.deskdb.core.Row row) {
+            return !hasFailed;
+        }
+        
         public boolean getValue() {
             return !hasFailed;
         }
@@ -209,13 +216,30 @@ public class Row {
 
     /**
      * Wrapper around Row that tracks if any LambdaFieldCondition has failed.
-     * Used by Filter.evaluateLambdaPredicate() to determine if a lambda filter passed.
+     * Uses delegation to avoid copying data, improving performance and reducing GC pressure.
      */
     public static class TrackingRow extends Row {
+        private final Row delegate;
         private boolean hasFailed = false;
         
         public TrackingRow(Row wrapped) {
-            super(wrapped.getRowId(), wrapped.getValues());
+            super(wrapped.getRowId(), Collections.emptyMap()); // No data copy
+            this.delegate = wrapped;
+        }
+        
+        @Override
+        public Object get(String column) {
+            return delegate.get(column); // Delegate, don't copy
+        }
+        
+        @Override
+        public Map<String, Object> getValues() {
+            return delegate.getValues(); // Delegate, don't copy
+        }
+        
+        @Override
+        public Set<String> getColumns() {
+            return delegate.getColumns(); // Delegate, don't copy
         }
         
         @Override
