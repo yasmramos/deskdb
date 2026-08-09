@@ -1,10 +1,17 @@
 package com.deskdb.core.storage.compression;
 
 /**
- * Compresor Delta Encoding para datos numéricos secuenciales.
- * Ideal para columnas con valores que incrementan/decrementan gradualmente.
+ * Delta Encoding compressor for sequential numeric data.
+ * Ideal for columns with values that increment/decrement gradually.
  * 
- * Almacena la diferencia (delta) entre valores consecutivos en lugar de los valores completos.
+ * Stores the difference (delta) between consecutive values instead of full values.
+ * 
+ * Note: The current implementation produces output of the same size as the input
+ * (one byte per delta). This means CompressionUtils.compressSmart will always
+ * discard this compression since it doesn't reduce size. For this compressor to
+ * be truly useful, consider packing deltas more compactly (e.g., using variable-length
+ * encoding for small deltas). The current implementation maintains round-trip correctness:
+ * decompress(compress(data)) == data
  */
 public class DeltaCompressor implements ColumnCompressor {
     
@@ -16,10 +23,10 @@ public class DeltaCompressor implements ColumnCompressor {
         
         java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
         
-        // Escribir el primer valor completo
+        // Write the first value complete
         output.write(data[0]);
         
-        // Escribir deltas para el resto
+        // Write deltas for the rest
         for (int i = 1; i < data.length; i++) {
             byte delta = (byte) (data[i] - data[i - 1]);
             output.write(delta);
@@ -36,11 +43,11 @@ public class DeltaCompressor implements ColumnCompressor {
         
         java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
         
-        // Primer valor es el original
+        // First value is the original
         byte previous = compressedData[0];
         output.write(previous);
         
-        // Reconstruir valores aplicando deltas
+        // Reconstruct values by applying deltas
         for (int i = 1; i < compressedData.length; i++) {
             byte delta = compressedData[i];
             byte value = (byte) (previous + delta);
