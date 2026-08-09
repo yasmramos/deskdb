@@ -48,10 +48,16 @@ public class RLECompressor implements ColumnCompressor {
         
         int i = 0;
         while (i < compressedData.length) {
-            int count = compressedData[i] & 0xFF; // Convertir a unsigned
+            // Validate that we have at least 2 bytes (count + value)
+            if (i + 1 >= compressedData.length) {
+                // Corrupt or odd-length data, stop decompression
+                break;
+            }
+            
+            int count = compressedData[i] & 0xFF; // Convert to unsigned
             byte value = compressedData[i + 1];
             
-            // Repetir el valor 'count' veces
+            // Repeat the value 'count' times
             for (int j = 0; j < count; j++) {
                 output.write(value);
             }

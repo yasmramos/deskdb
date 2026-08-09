@@ -20,6 +20,7 @@ import com.deskdb.core.Transaction;
 import com.deskdb.core.Row;
 import com.deskdb.core.Column;
 import com.deskdb.core.DataType;
+import com.deskdb.core.TableOperations;
 
 /**
  * Benchmark comparing DeskDB against popular embedded Java databases:
@@ -41,23 +42,25 @@ import com.deskdb.core.DataType;
 @Fork(2)
 public class EmbeddedDatabaseBenchmark {
 
-    // Test data size - increased for better batch throughput
+    // Dataset size parameter for scalability testing
+    @Param({"100", "1000", "5000"})
+    private int dataSize;
+    
+    // Test data size - will use dataSize parameter
     private static final int BATCH_SIZE = 5000;
+    
+    // Range query dataset size - will use dataSize parameter
+    private static final int RANGE_DATASET_SIZE = 100;
     
     // ID counter for unique inserts
     private int currentId = 1;
-    private final Object idLock = new Object();
     
     private int getNextId() {
-        synchronized (idLock) {
-            return currentId++;
-        }
+        return currentId++;
     }
     
     private void resetIdCounter() {
-        synchronized (idLock) {
-            currentId = 1;
-        }
+        currentId = 1;
     }
     
     // Database instances
@@ -71,6 +74,12 @@ public class EmbeddedDatabaseBenchmark {
     private File h2File;
     private File sqliteFile;
     private File hsqldbFile;
+    
+    // Pre-loaded data for read benchmarks (per iteration)
+    private int readPointId;
+    private int updateId;
+    private int deleteId;
+    private int rangeBaseId;
     
     @Setup(Level.Trial)
     public void setupTrial() throws SQLException {
@@ -121,7 +130,7 @@ public class EmbeddedDatabaseBenchmark {
     }
     
     @Setup(Level.Iteration)
-    public void setupIteration() throws SQLException {
+    public void setupIteration() throws Exception {
         // Clear data before each iteration
         clearDeskDB();
         clearH2();
@@ -129,6 +138,204 @@ public class EmbeddedDatabaseBenchmark {
         clearHSQLDB();
         // Reset ID counter for unique inserts
         resetIdCounter();
+        
+        // Pre-load data for read benchmarks
+        preloadReadData();
+    }
+    
+    private void preloadReadData() throws Exception {
+        // Generate unique IDs for this iteration
+        readPointId = getNextId();
+        updateId = getNextId();
+        deleteId = getNextId();
+        rangeBaseId = getNextId();
+        
+        // Pre-load data for point read benchmarks
+        deskDB.table("users")
+            .insert()
+            .value("id", readPointId)
+            .value("name", "Query Test")
+            .value("email", "query@example.com")
+            .value("age", 25)
+            .value("balance", 500.0)
+            .execute();
+        
+        try (PreparedStatement ps = h2Conn.prepareStatement(
+                "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
+            ps.setInt(1, readPointId);
+            ps.setString(2, "Query Test");
+            ps.setString(3, "query@example.com");
+            ps.setInt(4, 25);
+            ps.setDouble(5, 500.0);
+            ps.executeUpdate();
+        }
+        
+        try (PreparedStatement ps = sqliteConn.prepareStatement(
+                "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
+            ps.setInt(1, readPointId);
+            ps.setString(2, "Query Test");
+            ps.setString(3, "query@example.com");
+            ps.setInt(4, 25);
+            ps.setDouble(5, 500.0);
+            ps.executeUpdate();
+        }
+        
+        try (PreparedStatement ps = hsqldbConn.prepareStatement(
+                "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
+            ps.setInt(1, readPointId);
+            ps.setString(2, "Query Test");
+            ps.setString(3, "query@example.com");
+            ps.setInt(4, 25);
+            ps.setDouble(5, 500.0);
+            ps.executeUpdate();
+        }
+        
+        // Pre-load data for update benchmarks
+        deskDB.table("users")
+            .insert()
+            .value("id", updateId)
+            .value("name", "Update Test")
+            .value("email", "update@example.com")
+            .value("age", 25)
+            .value("balance", 100.0)
+            .execute();
+        
+        try (PreparedStatement ps = h2Conn.prepareStatement(
+                "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
+            ps.setInt(1, updateId);
+            ps.setString(2, "Update Test");
+            ps.setString(3, "update@example.com");
+            ps.setInt(4, 25);
+            ps.setDouble(5, 100.0);
+            ps.executeUpdate();
+        }
+        
+        try (PreparedStatement ps = sqliteConn.prepareStatement(
+                "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
+            ps.setInt(1, updateId);
+            ps.setString(2, "Update Test");
+            ps.setString(3, "update@example.com");
+            ps.setInt(4, 25);
+            ps.setDouble(5, 100.0);
+            ps.executeUpdate();
+        }
+        
+        try (PreparedStatement ps = hsqldbConn.prepareStatement(
+                "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
+            ps.setInt(1, updateId);
+            ps.setString(2, "Update Test");
+            ps.setString(3, "update@example.com");
+            ps.setInt(4, 25);
+            ps.setDouble(5, 100.0);
+            ps.executeUpdate();
+        }
+        
+        // Pre-load data for delete benchmarks
+        deskDB.table("users")
+            .insert()
+            .value("id", deleteId)
+            .value("name", "Delete Test")
+            .value("email", "delete@example.com")
+            .value("age", 25)
+            .value("balance", 100.0)
+            .execute();
+        
+        try (PreparedStatement ps = h2Conn.prepareStatement(
+                "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
+            ps.setInt(1, deleteId);
+            ps.setString(2, "Delete Test");
+            ps.setString(3, "delete@example.com");
+            ps.setInt(4, 25);
+            ps.setDouble(5, 100.0);
+            ps.executeUpdate();
+        }
+        
+        try (PreparedStatement ps = sqliteConn.prepareStatement(
+                "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
+            ps.setInt(1, deleteId);
+            ps.setString(2, "Delete Test");
+            ps.setString(3, "delete@example.com");
+            ps.setInt(4, 25);
+            ps.setDouble(5, 100.0);
+            ps.executeUpdate();
+        }
+        
+        try (PreparedStatement ps = hsqldbConn.prepareStatement(
+                "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
+            ps.setInt(1, deleteId);
+            ps.setString(2, "Delete Test");
+            ps.setString(3, "delete@example.com");
+            ps.setInt(4, 25);
+            ps.setDouble(5, 100.0);
+            ps.executeUpdate();
+        }
+        
+        // Pre-load data for range query benchmarks (dataSize rows with varying ages)
+        int rangeSize = Math.min(dataSize, RANGE_DATASET_SIZE);
+        try (Transaction tx = deskDB.beginTransaction()) {
+            TableOperations table = tx.table("users");
+            for (int i = 0; i < rangeSize; i++) {
+                table.insert()
+                    .value("id", rangeBaseId + i)
+                    .value("name", "Range User " + i)
+                    .value("email", "range" + i + "@example.com")
+                    .value("age", 20 + (i % 50))
+                    .value("balance", 1000.0 + i * 1.5)
+                    .execute();
+            }
+            tx.commit();
+        }
+        
+        h2Conn.setAutoCommit(false);
+        try (PreparedStatement ps = h2Conn.prepareStatement(
+                "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
+            for (int i = 0; i < rangeSize; i++) {
+                ps.setInt(1, rangeBaseId + i);
+                ps.setString(2, "Range User " + i);
+                ps.setString(3, "range" + i + "@example.com");
+                ps.setInt(4, 20 + (i % 50));
+                ps.setDouble(5, 1000.0 + i * 1.5);
+                ps.addBatch();
+            }
+            ps.executeBatch();
+            h2Conn.commit();
+        } finally {
+            h2Conn.setAutoCommit(true);
+        }
+        
+        sqliteConn.setAutoCommit(false);
+        try (PreparedStatement ps = sqliteConn.prepareStatement(
+                "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
+            for (int i = 0; i < rangeSize; i++) {
+                ps.setInt(1, rangeBaseId + i);
+                ps.setString(2, "Range User " + i);
+                ps.setString(3, "range" + i + "@example.com");
+                ps.setInt(4, 20 + (i % 50));
+                ps.setDouble(5, 1000.0 + i * 1.5);
+                ps.addBatch();
+            }
+            ps.executeBatch();
+            sqliteConn.commit();
+        } finally {
+            sqliteConn.setAutoCommit(true);
+        }
+        
+        hsqldbConn.setAutoCommit(false);
+        try (PreparedStatement ps = hsqldbConn.prepareStatement(
+                "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
+            for (int i = 0; i < rangeSize; i++) {
+                ps.setInt(1, rangeBaseId + i);
+                ps.setString(2, "Range User " + i);
+                ps.setString(3, "range" + i + "@example.com");
+                ps.setInt(4, 20 + (i % 50));
+                ps.setDouble(5, 1000.0 + i * 1.5);
+                ps.addBatch();
+            }
+            ps.executeBatch();
+            hsqldbConn.commit();
+        } finally {
+            hsqldbConn.setAutoCommit(true);
+        }
     }
     
     private void cleanupFiles() {
@@ -237,9 +444,9 @@ public class EmbeddedDatabaseBenchmark {
     
     @Benchmark
     public void insertSingle_DeskDB() {
-        try {
+        try (Transaction tx = deskDB.beginTransaction()) {
             int id = getNextId();
-            deskDB.table("users")
+            tx.table("users")
                 .insert()
                 .value("id", id)
                 .value("name", "Test User " + id)
@@ -247,6 +454,7 @@ public class EmbeddedDatabaseBenchmark {
                 .value("age", 30)
                 .value("balance", 1000.50)
                 .execute();
+            tx.commit();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -256,9 +464,10 @@ public class EmbeddedDatabaseBenchmark {
     public void insertSingle_H2() throws SQLException {
         try (PreparedStatement ps = h2Conn.prepareStatement(
                 "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            ps.setInt(1, 1);
-            ps.setString(2, "Test User");
-            ps.setString(3, "test@example.com");
+            int id = getNextId();
+            ps.setInt(1, id);
+            ps.setString(2, "Test User " + id);
+            ps.setString(3, "test" + id + "@example.com");
             ps.setInt(4, 30);
             ps.setDouble(5, 1000.50);
             ps.executeUpdate();
@@ -269,9 +478,10 @@ public class EmbeddedDatabaseBenchmark {
     public void insertSingle_SQLite() throws SQLException {
         try (PreparedStatement ps = sqliteConn.prepareStatement(
                 "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            ps.setInt(1, 1);
-            ps.setString(2, "Test User");
-            ps.setString(3, "test@example.com");
+            int id = getNextId();
+            ps.setInt(1, id);
+            ps.setString(2, "Test User " + id);
+            ps.setString(3, "test" + id + "@example.com");
             ps.setInt(4, 30);
             ps.setDouble(5, 1000.50);
             ps.executeUpdate();
@@ -282,9 +492,10 @@ public class EmbeddedDatabaseBenchmark {
     public void insertSingle_HSQLDB() throws SQLException {
         try (PreparedStatement ps = hsqldbConn.prepareStatement(
                 "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            ps.setInt(1, 1);
-            ps.setString(2, "Test User");
-            ps.setString(3, "test@example.com");
+            int id = getNextId();
+            ps.setInt(1, id);
+            ps.setString(2, "Test User " + id);
+            ps.setString(3, "test" + id + "@example.com");
             ps.setInt(4, 30);
             ps.setDouble(5, 1000.50);
             ps.executeUpdate();
@@ -294,10 +505,10 @@ public class EmbeddedDatabaseBenchmark {
     @Benchmark
     public void insertBatch_DeskDB() {
         try (Transaction tx = deskDB.beginTransaction()) {
+            TableOperations table = tx.table("users");
             for (int i = 0; i < BATCH_SIZE; i++) {
                 int id = getNextId();
-                deskDB.table("users")
-                    .insert()
+                table.insert()
                     .value("id", id)
                     .value("name", "User " + id)
                     .value("email", "user" + id + "@example.com")
@@ -376,20 +587,11 @@ public class EmbeddedDatabaseBenchmark {
     @Benchmark
     public void readPoint_DeskDB() {
         try {
-            // First insert a record
-            deskDB.table("users")
-                .insert()
-                .value("id", 999)
-                .value("name", "Query Test")
-                .value("email", "query@example.com")
-                .value("age", 25)
-                .value("balance", 500.0)
-                .execute();
-            
+            // Read pre-loaded data (data is loaded in @Setup(Level.Iteration))
             List<Row> results = deskDB.table("users")
                 .select()
                 .where("id")
-                .isEqualTo(999)
+                .isEqualTo(readPointId)
                 .execute();
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -398,20 +600,9 @@ public class EmbeddedDatabaseBenchmark {
     
     @Benchmark
     public void readPoint_H2() throws SQLException {
-        // First insert a record
-        try (PreparedStatement ps = h2Conn.prepareStatement(
-                "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            ps.setInt(1, 999);
-            ps.setString(2, "Query Test");
-            ps.setString(3, "query@example.com");
-            ps.setInt(4, 25);
-            ps.setDouble(5, 500.0);
-            ps.executeUpdate();
-        }
-        
         try (PreparedStatement ps = h2Conn.prepareStatement(
                 "SELECT * FROM users WHERE id = ?")) {
-            ps.setInt(1, 999);
+            ps.setInt(1, readPointId);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     // Consume result
@@ -422,20 +613,9 @@ public class EmbeddedDatabaseBenchmark {
     
     @Benchmark
     public void readPoint_SQLite() throws SQLException {
-        // First insert a record
-        try (PreparedStatement ps = sqliteConn.prepareStatement(
-                "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            ps.setInt(1, 999);
-            ps.setString(2, "Query Test");
-            ps.setString(3, "query@example.com");
-            ps.setInt(4, 25);
-            ps.setDouble(5, 500.0);
-            ps.executeUpdate();
-        }
-        
         try (PreparedStatement ps = sqliteConn.prepareStatement(
                 "SELECT * FROM users WHERE id = ?")) {
-            ps.setInt(1, 999);
+            ps.setInt(1, readPointId);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     // Consume result
@@ -446,20 +626,9 @@ public class EmbeddedDatabaseBenchmark {
     
     @Benchmark
     public void readPoint_HSQLDB() throws SQLException {
-        // First insert a record
-        try (PreparedStatement ps = hsqldbConn.prepareStatement(
-                "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            ps.setInt(1, 999);
-            ps.setString(2, "Query Test");
-            ps.setString(3, "query@example.com");
-            ps.setInt(4, 25);
-            ps.setDouble(5, 500.0);
-            ps.executeUpdate();
-        }
-        
         try (PreparedStatement ps = hsqldbConn.prepareStatement(
                 "SELECT * FROM users WHERE id = ?")) {
-            ps.setInt(1, 999);
+            ps.setInt(1, readPointId);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     // Consume result
@@ -471,21 +640,7 @@ public class EmbeddedDatabaseBenchmark {
     @Benchmark
     public void readRange_DeskDB() {
         try {
-            // Insert test data
-            try (Transaction tx = deskDB.beginTransaction()) {
-                for (int i = 0; i < 100; i++) {
-                    deskDB.table("users")
-                        .insert()
-                        .value("id", i)
-                        .value("name", "User " + i)
-                        .value("email", "user" + i + "@example.com")
-                        .value("age", 20 + (i % 50))
-                        .value("balance", 1000.0 + i * 1.5)
-                        .execute();
-                }
-                tx.commit();
-            }
-            
+            // Read pre-loaded data (data is loaded in @Setup(Level.Iteration))
             List<Row> results = deskDB.table("users")
                 .select()
                 .where("age")
@@ -502,24 +657,6 @@ public class EmbeddedDatabaseBenchmark {
     
     @Benchmark
     public void readRange_H2() throws SQLException {
-        // Insert test data
-        h2Conn.setAutoCommit(false);
-        try (PreparedStatement ps = h2Conn.prepareStatement(
-                "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            for (int i = 0; i < 100; i++) {
-                ps.setInt(1, i);
-                ps.setString(2, "User " + i);
-                ps.setString(3, "user" + i + "@example.com");
-                ps.setInt(4, 20 + (i % 50));
-                ps.setDouble(5, 1000.0 + i * 1.5);
-                ps.addBatch();
-            }
-            ps.executeBatch();
-            h2Conn.commit();
-        } finally {
-            h2Conn.setAutoCommit(true);
-        }
-        
         try (PreparedStatement ps = h2Conn.prepareStatement(
                 "SELECT * FROM users WHERE age BETWEEN ? AND ? ORDER BY name LIMIT 50")) {
             ps.setInt(1, 30);
@@ -534,24 +671,6 @@ public class EmbeddedDatabaseBenchmark {
     
     @Benchmark
     public void readRange_SQLite() throws SQLException {
-        // Insert test data
-        sqliteConn.setAutoCommit(false);
-        try (PreparedStatement ps = sqliteConn.prepareStatement(
-                "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            for (int i = 0; i < 100; i++) {
-                ps.setInt(1, i);
-                ps.setString(2, "User " + i);
-                ps.setString(3, "user" + i + "@example.com");
-                ps.setInt(4, 20 + (i % 50));
-                ps.setDouble(5, 1000.0 + i * 1.5);
-                ps.addBatch();
-            }
-            ps.executeBatch();
-            sqliteConn.commit();
-        } finally {
-            sqliteConn.setAutoCommit(true);
-        }
-        
         try (PreparedStatement ps = sqliteConn.prepareStatement(
                 "SELECT * FROM users WHERE age BETWEEN ? AND ? ORDER BY name LIMIT 50")) {
             ps.setInt(1, 30);
@@ -566,24 +685,6 @@ public class EmbeddedDatabaseBenchmark {
     
     @Benchmark
     public void readRange_HSQLDB() throws SQLException {
-        // Insert test data
-        hsqldbConn.setAutoCommit(false);
-        try (PreparedStatement ps = hsqldbConn.prepareStatement(
-                "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            for (int i = 0; i < 100; i++) {
-                ps.setInt(1, i);
-                ps.setString(2, "User " + i);
-                ps.setString(3, "user" + i + "@example.com");
-                ps.setInt(4, 20 + (i % 50));
-                ps.setDouble(5, 1000.0 + i * 1.5);
-                ps.addBatch();
-            }
-            ps.executeBatch();
-            hsqldbConn.commit();
-        } finally {
-            hsqldbConn.setAutoCommit(true);
-        }
-        
         try (PreparedStatement ps = hsqldbConn.prepareStatement(
                 "SELECT * FROM users WHERE age BETWEEN ? AND ? ORDER BY name LIMIT 50")) {
             ps.setInt(1, 30);
@@ -601,22 +702,12 @@ public class EmbeddedDatabaseBenchmark {
     @Benchmark
     public void update_DeskDB() {
         try {
-            // Insert first
-            deskDB.table("users")
-                .insert()
-                .value("id", 888)
-                .value("name", "Update Test")
-                .value("email", "update@example.com")
-                .value("age", 25)
-                .value("balance", 100.0)
-                .execute();
-            
-            // Then update
+            // Update pre-loaded data (data is loaded in @Setup(Level.Iteration))
             deskDB.table("users")
                 .update()
                 .set("balance", 200.0)
                 .where("id")
-                .isEqualTo(888)
+                .isEqualTo(updateId)
                 .execute();
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -625,66 +716,30 @@ public class EmbeddedDatabaseBenchmark {
     
     @Benchmark
     public void update_H2() throws SQLException {
-        // Insert first
-        try (PreparedStatement ps = h2Conn.prepareStatement(
-                "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            ps.setInt(1, 888);
-            ps.setString(2, "Update Test");
-            ps.setString(3, "update@example.com");
-            ps.setInt(4, 25);
-            ps.setDouble(5, 100.0);
-            ps.executeUpdate();
-        }
-        
-        // Then update
         try (PreparedStatement ps = h2Conn.prepareStatement(
                 "UPDATE users SET balance = ? WHERE id = ?")) {
             ps.setDouble(1, 200.0);
-            ps.setInt(2, 888);
+            ps.setInt(2, updateId);
             ps.executeUpdate();
         }
     }
     
     @Benchmark
     public void update_SQLite() throws SQLException {
-        // Insert first
-        try (PreparedStatement ps = sqliteConn.prepareStatement(
-                "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            ps.setInt(1, 888);
-            ps.setString(2, "Update Test");
-            ps.setString(3, "update@example.com");
-            ps.setInt(4, 25);
-            ps.setDouble(5, 100.0);
-            ps.executeUpdate();
-        }
-        
-        // Then update
         try (PreparedStatement ps = sqliteConn.prepareStatement(
                 "UPDATE users SET balance = ? WHERE id = ?")) {
             ps.setDouble(1, 200.0);
-            ps.setInt(2, 888);
+            ps.setInt(2, updateId);
             ps.executeUpdate();
         }
     }
     
     @Benchmark
     public void update_HSQLDB() throws SQLException {
-        // Insert first
-        try (PreparedStatement ps = hsqldbConn.prepareStatement(
-                "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            ps.setInt(1, 888);
-            ps.setString(2, "Update Test");
-            ps.setString(3, "update@example.com");
-            ps.setInt(4, 25);
-            ps.setDouble(5, 100.0);
-            ps.executeUpdate();
-        }
-        
-        // Then update
         try (PreparedStatement ps = hsqldbConn.prepareStatement(
                 "UPDATE users SET balance = ? WHERE id = ?")) {
             ps.setDouble(1, 200.0);
-            ps.setInt(2, 888);
+            ps.setInt(2, updateId);
             ps.executeUpdate();
         }
     }
@@ -694,21 +749,11 @@ public class EmbeddedDatabaseBenchmark {
     @Benchmark
     public void delete_DeskDB() {
         try {
-            // Insert first
-            deskDB.table("users")
-                .insert()
-                .value("id", 777)
-                .value("name", "Delete Test")
-                .value("email", "delete@example.com")
-                .value("age", 25)
-                .value("balance", 100.0)
-                .execute();
-            
-            // Then delete
+            // Delete pre-loaded data (data is loaded in @Setup(Level.Iteration))
             deskDB.table("users")
                 .delete()
                 .where("id")
-                .isEqualTo(777)
+                .isEqualTo(deleteId)
                 .execute();
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -717,63 +762,27 @@ public class EmbeddedDatabaseBenchmark {
     
     @Benchmark
     public void delete_H2() throws SQLException {
-        // Insert first
-        try (PreparedStatement ps = h2Conn.prepareStatement(
-                "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            ps.setInt(1, 777);
-            ps.setString(2, "Delete Test");
-            ps.setString(3, "delete@example.com");
-            ps.setInt(4, 25);
-            ps.setDouble(5, 100.0);
-            ps.executeUpdate();
-        }
-        
-        // Then delete
         try (PreparedStatement ps = h2Conn.prepareStatement(
                 "DELETE FROM users WHERE id = ?")) {
-            ps.setInt(1, 777);
+            ps.setInt(1, deleteId);
             ps.executeUpdate();
         }
     }
     
     @Benchmark
     public void delete_SQLite() throws SQLException {
-        // Insert first
-        try (PreparedStatement ps = sqliteConn.prepareStatement(
-                "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            ps.setInt(1, 777);
-            ps.setString(2, "Delete Test");
-            ps.setString(3, "delete@example.com");
-            ps.setInt(4, 25);
-            ps.setDouble(5, 100.0);
-            ps.executeUpdate();
-        }
-        
-        // Then delete
         try (PreparedStatement ps = sqliteConn.prepareStatement(
                 "DELETE FROM users WHERE id = ?")) {
-            ps.setInt(1, 777);
+            ps.setInt(1, deleteId);
             ps.executeUpdate();
         }
     }
     
     @Benchmark
     public void delete_HSQLDB() throws SQLException {
-        // Insert first
-        try (PreparedStatement ps = hsqldbConn.prepareStatement(
-                "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            ps.setInt(1, 777);
-            ps.setString(2, "Delete Test");
-            ps.setString(3, "delete@example.com");
-            ps.setInt(4, 25);
-            ps.setDouble(5, 100.0);
-            ps.executeUpdate();
-        }
-        
-        // Then delete
         try (PreparedStatement ps = hsqldbConn.prepareStatement(
                 "DELETE FROM users WHERE id = ?")) {
-            ps.setInt(1, 777);
+            ps.setInt(1, deleteId);
             ps.executeUpdate();
         }
     }
