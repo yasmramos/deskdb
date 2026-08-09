@@ -50,12 +50,6 @@ public class DeskDB implements AutoCloseable {
         this.catalogManager = new CatalogManager(); // Initialize catalog manager
         this.inMemoryOnly = false;
         
-        // Validate that dbPath is not a directory
-        if (Files.exists(dbPath) && Files.isDirectory(dbPath)) {
-            throw new IOException("Database path '" + dbPath.toAbsolutePath() + "' is a directory, not a file. " +
-                    "Please provide a valid file path ending with .deskdb");
-        }
-        
         // Determinar ruta del WAL (mismo directorio que el archivo .deskdb)
         Path walPath = dbPath.resolveSibling(dbPath.getFileName().toString() + ".wal");
         
@@ -157,11 +151,18 @@ public class DeskDB implements AutoCloseable {
     /**
      * Abre una base de datos DeskDB en la ruta especificada.
      *
-     * @param path Ruta al archivo .deskdb
+     * @param path Ruta al archivo .deskdb o directorio (si es directorio, se usará db.deskdb dentro)
      * @return Instancia de DeskDB
      * @throws IOException si hay un error de E/S
      */
     public static DeskDB open(Path path) throws IOException {
+        // Handle case where path is a directory - convert to file path inside that directory
+        if (Files.isDirectory(path)) {
+            Path newPath = path.resolve("db.deskdb");
+            logger.info("Path '{}' is a directory, using database file at '{}'", path.toAbsolutePath(), newPath.toAbsolutePath());
+            path = newPath;
+        }
+        
         if (!path.toString().endsWith(".deskdb")) {
             logger.warn("La ruta no termina en .deskdb, pero se procederá");
         }
