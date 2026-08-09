@@ -439,9 +439,9 @@ public class EmbeddedDatabaseBenchmark {
     
     @Benchmark
     public void insertSingle_DeskDB() {
-        try {
+        try (Transaction tx = deskDB.beginTransaction()) {
             int id = getNextId();
-            deskDB.table("users")
+            tx.table("users")
                 .insert()
                 .value("id", id)
                 .value("name", "Test User " + id)
@@ -449,6 +449,7 @@ public class EmbeddedDatabaseBenchmark {
                 .value("age", 30)
                 .value("balance", 1000.50)
                 .execute();
+            tx.commit();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
