@@ -42,10 +42,14 @@ import com.deskdb.core.TableOperations;
 @Fork(2)
 public class EmbeddedDatabaseBenchmark {
 
-    // Test data size - increased for better batch throughput
+    // Dataset size parameter for scalability testing
+    @Param({"100", "1000", "5000"})
+    private int dataSize;
+    
+    // Test data size - will use dataSize parameter
     private static final int BATCH_SIZE = 5000;
     
-    // Range query dataset size
+    // Range query dataset size - will use dataSize parameter
     private static final int RANGE_DATASET_SIZE = 100;
     
     // ID counter for unique inserts
@@ -266,10 +270,11 @@ public class EmbeddedDatabaseBenchmark {
             ps.executeUpdate();
         }
         
-        // Pre-load data for range query benchmarks (100 rows with varying ages)
+        // Pre-load data for range query benchmarks (dataSize rows with varying ages)
+        int rangeSize = Math.min(dataSize, RANGE_DATASET_SIZE);
         try (Transaction tx = deskDB.beginTransaction()) {
             TableOperations table = tx.table("users");
-            for (int i = 0; i < RANGE_DATASET_SIZE; i++) {
+            for (int i = 0; i < rangeSize; i++) {
                 table.insert()
                     .value("id", rangeBaseId + i)
                     .value("name", "Range User " + i)
@@ -284,7 +289,7 @@ public class EmbeddedDatabaseBenchmark {
         h2Conn.setAutoCommit(false);
         try (PreparedStatement ps = h2Conn.prepareStatement(
                 "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            for (int i = 0; i < RANGE_DATASET_SIZE; i++) {
+            for (int i = 0; i < rangeSize; i++) {
                 ps.setInt(1, rangeBaseId + i);
                 ps.setString(2, "Range User " + i);
                 ps.setString(3, "range" + i + "@example.com");
@@ -301,7 +306,7 @@ public class EmbeddedDatabaseBenchmark {
         sqliteConn.setAutoCommit(false);
         try (PreparedStatement ps = sqliteConn.prepareStatement(
                 "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            for (int i = 0; i < RANGE_DATASET_SIZE; i++) {
+            for (int i = 0; i < rangeSize; i++) {
                 ps.setInt(1, rangeBaseId + i);
                 ps.setString(2, "Range User " + i);
                 ps.setString(3, "range" + i + "@example.com");
@@ -318,7 +323,7 @@ public class EmbeddedDatabaseBenchmark {
         hsqldbConn.setAutoCommit(false);
         try (PreparedStatement ps = hsqldbConn.prepareStatement(
                 "INSERT INTO users (id, name, email, age, balance) VALUES (?, ?, ?, ?, ?)")) {
-            for (int i = 0; i < RANGE_DATASET_SIZE; i++) {
+            for (int i = 0; i < rangeSize; i++) {
                 ps.setInt(1, rangeBaseId + i);
                 ps.setString(2, "Range User " + i);
                 ps.setString(3, "range" + i + "@example.com");
