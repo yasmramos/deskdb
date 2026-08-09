@@ -37,6 +37,9 @@ public class MVCC {
     // Lightweight mode flag - skips version tracking for better performance
     private volatile boolean lightweightMode = false;
     
+    // Maximum versions per row to prevent memory bloat
+    private static final int MAX_VERSIONS_PER_ROW = 10;
+    
     // Simple data store for lightweight mode: rowId -> data
     private final Map<Long, Map<String, Object>> lightweightData = new ConcurrentHashMap<>();
     
@@ -173,13 +176,17 @@ public class MVCC {
             // Find the latest version to link to
             Long previousVersionId = versions.isEmpty() ? null : versions.get(0).version;
             
-            RowVersion newRowVersion = new RowVersion(rowId, newVersion, timestamp, transactionId, data, false, previousVersionId);
+            // Create defensive copy of data to prevent external mutations
+            RowVersion newRowVersion = new RowVersion(rowId, newVersion, timestamp, transactionId, 
+                new HashMap<>(data), false, previousVersionId);
             
             // Add to front of list (newest first)
             versions.add(0, newRowVersion);
             
-            // Limit version history to prevent memory bloat (keep last 10 versions)
-            if (versions.size() > 10) {
+            // Limit version history to prevent memory bloat
+            // Note: This is a simple limit; in production, should delegate to vacuum() 
+            // which considers oldest active transaction timestamp
+            if (versions.size() > MAX_VERSIONS_PER_ROW) {
                 versions.remove(versions.size() - 1);
             }
             
@@ -221,7 +228,9 @@ public class MVCC {
             
             versions.add(0, deletedVersion);
             
-            if (versions.size() > 10) {
+            // Limit version history to prevent memory bloat
+            // Note: This is a simple limit; in production, should delegate to vacuum()
+            if (versions.size() > MAX_VERSIONS_PER_ROW) {
                 versions.remove(versions.size() - 1);
             }
             
@@ -273,14 +282,15 @@ public class MVCC {
      * Find the visible version for a row according to snapshot isolation rules.
      * 
      * Visibility Rules:
-     * 1. Version must be committed (transaction not in active list at snapshot time)
-     * 2. Version timestamp must be <= snapshot creation time
-     * 3. Among visible versions, return the most recent one
+     * 1. Version must be from the reader's own transaction (version.transactionId == transactionId), OR
+     * 2. Version's version number <= transactionVersion (snapshot timestamp) AND
+     *    the creating transaction was not active at snapshot time (!activeAtSnapshot.contains(version.transactionId))
+     * 3. Among visible versions, return the most recent one (first in the list since it's ordered newest first)
      */
     private RowVersion findVisibleVersion(List<RowVersion> versions, long transactionVersion,
                                           long transactionId, List<Long> activeAtSnapshot) {
         for (RowVersion version : versions) {
-            if (isVisible(version, transactionId, activeAtSnapshot)) {
+            if (isVisible(version, transactionVersion, transactionId, activeAtSnapshot)) {
                 return version;
             }
         }
@@ -289,15 +299,21 @@ public class MVCC {
     
     /**
      * Check if a version is visible according to snapshot isolation.
+     * A version is visible if:
+     * - It was created by the reader's own transaction, OR
+     * - It was committed before the reader's snapshot (version <= transactionVersion) AND
+     *   the creating transaction was not active at snapshot time
      */
-    private boolean isVisible(RowVersion version, long transactionId, List<Long> activeAtSnapshot) {
-        // Rule 1: Version must be from a committed transaction
-        // (transaction was not active at snapshot time, OR it's the snapshot's own transaction)
-        if (version.transactionId != transactionId && activeAtSnapshot.contains(version.transactionId)) {
-            return false; // Uncommitted transaction
+    private boolean isVisible(RowVersion version, long transactionVersion, long transactionId, List<Long> activeAtSnapshot) {
+        // Rule 1: Always visible if created by own transaction
+        if (version.transactionId == transactionId) {
+            return true;
         }
         
-        return true;
+        // Rule 2 & 3: Visible if committed before snapshot AND creator not active at snapshot
+        // version.version <= transactionVersion ensures we only see data committed before our snapshot
+        // !activeAtSnapshot.contains ensures the creating transaction was already committed
+        return version.version <= transactionVersion && !activeAtSnapshot.contains(version.transactionId);
     }
     
     /**

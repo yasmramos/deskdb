@@ -300,7 +300,7 @@ public class AdvancedFluentApiTest {
         // Delete using lambda predicate
         db.table("users")
             .delete()
-            .where(user -> { var cond = user.field("id").eq(200); return cond.getValue(); })
+            .where(user -> user.field("id").eq(200))
             .execute();
         
         int finalCount = db.table("users").select().execute().size();
@@ -322,7 +322,7 @@ public class AdvancedFluentApiTest {
         db.table("users")
             .update()
             .set("status", "premium")
-            .where(user -> { var cond = user.field("age").gt(40); return cond.getValue(); })
+            .where(user -> user.field("age").gt(40))
             .execute();
         
         // Verify update
