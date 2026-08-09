@@ -29,23 +29,25 @@ class NoOpCompressorTest {
     }
 
     @Test
-    @DisplayName("should return null when compressing null input")
-    void shouldReturnNullForNullInput() {
+    @DisplayName("should return empty array when compressing null input")
+    void shouldReturnEmptyArrayForNullInput() {
         // When
         byte[] result = compressor.compress(null);
 
         // Then
-        assertNull(result, "Compressing null should return null");
+        assertNotNull(result, "Compressing null should return empty array, not null");
+        assertEquals(0, result.length, "Compressed null should return empty array");
     }
 
     @Test
-    @DisplayName("should return null when decompressing null input")
-    void shouldReturnNullForNullDecompressInput() {
+    @DisplayName("should return empty array when decompressing null input")
+    void shouldReturnEmptyArrayForNullDecompressInput() {
         // When
         byte[] result = compressor.decompress(null);
 
         // Then
-        assertNull(result, "Decompressing null should return null");
+        assertNotNull(result, "Decompressing null should return empty array, not null");
+        assertEquals(0, result.length, "Decompressed null should return empty array");
     }
 
     @Test
