@@ -87,12 +87,47 @@ public class ColumnDictionary {
 
     /**
      * Reads the dictionary from the ByteBuffer and populates internal maps.
+     * Validates length values to prevent BufferUnderflowException and OutOfMemoryError
+     * from corrupted or malicious data.
      */
     public synchronized void readFromBuffer(ByteBuffer buffer) {
         clear();
+        
+        if (buffer.remaining() < 4) {
+            throw new IllegalArgumentException("Corrupted data: insufficient bytes for dictionary count");
+        }
+        
         int count = buffer.getInt();
+        
+        if (count < 0) {
+            throw new IllegalArgumentException("Corrupted data: negative dictionary count: " + count);
+        }
+        
+        // Sanity check to prevent OOM with extremely large counts
+        if (count > 1_000_000) {
+            throw new IllegalArgumentException("Corrupted data: unreasonably large dictionary count: " + count);
+        }
+        
         for (int i = 0; i < count; i++) {
+            if (buffer.remaining() < 4) {
+                throw new IllegalArgumentException("Corrupted data: insufficient bytes for string length at index " + i);
+            }
+            
             int len = buffer.getInt();
+            
+            if (len < 0) {
+                throw new IllegalArgumentException("Corrupted data: negative string length at index " + i + ": " + len);
+            }
+            
+            if (len > 10_000_000) {
+                throw new IllegalArgumentException("Corrupted data: unreasonably large string length at index " + i + ": " + len);
+            }
+            
+            if (buffer.remaining() < len) {
+                throw new IllegalArgumentException("Corrupted data: insufficient bytes for string data at index " + i + 
+                    ". Expected " + len + " bytes, but only " + buffer.remaining() + " available");
+            }
+            
             byte[] bytes = new byte[len];
             buffer.get(bytes);
             String val = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
