@@ -60,8 +60,8 @@ public class Wal implements AutoCloseable {
     private final AtomicBoolean flushScheduled;
     private volatile boolean needsForce = false;
     
-    // Contador de operaciones pendientes de commit
-    private volatile int pendingOperations = 0;
+    // Contador atómico de operaciones pendientes de commit
+    private final AtomicInteger pendingOperations = new AtomicInteger(0);
     private final Object commitLock = new Object();
     
     /**
@@ -163,7 +163,7 @@ public class Wal implements AutoCloseable {
                     Thread.sleep(FLUSH_INTERVAL_MS);
                     
                     // Si hay operaciones pendientes, hacer flush
-                    if (pendingOperations > 0 || !writeBuffer.isEmpty()) {
+                    if (pendingOperations.get() > 0 || !writeBuffer.isEmpty()) {
                         doFlush();
                     }
                 } catch (InterruptedException e) {
@@ -206,10 +206,10 @@ public class Wal implements AutoCloseable {
             synchronized (this) {
                 doFlush();
                 writeBuffer.offer(entry);
-                pendingOperations++;
+                pendingOperations.incrementAndGet();
             }
         } else {
-            pendingOperations++;
+            pendingOperations.incrementAndGet();
             scheduleFlush();
         }
         
@@ -244,7 +244,7 @@ public class Wal implements AutoCloseable {
      * Realiza el flush de todas las entradas bufferizadas al disco con batching optimizado
      */
     private synchronized void doFlush() throws IOException {
-        if (writeBuffer.isEmpty() && pendingOperations == 0) {
+        if (writeBuffer.isEmpty() && pendingOperations.get() == 0) {
             return;
         }
         
@@ -252,15 +252,15 @@ public class Wal implements AutoCloseable {
         writeBuffer.drainTo(batch, BATCH_COMMIT_THRESHOLD);
         
         // Skip flush if batch is too small (unless we have pending operations waiting)
-        if (batch.size() < MIN_BATCH_SIZE && pendingOperations > BATCH_COMMIT_THRESHOLD) {
+        if (batch.size() < MIN_BATCH_SIZE && pendingOperations.get() > BATCH_COMMIT_THRESHOLD) {
             return; // Wait for more entries to accumulate
         }
         
-        if (batch.isEmpty() && pendingOperations > 0) {
+        if (batch.isEmpty() && pendingOperations.get() > 0) {
             // No hay entradas nuevas pero hay operaciones pendientes
             // Esto puede pasar si las entradas ya fueron escritas pero no flushed
             channel.force(false);
-            pendingOperations = 0;
+            pendingOperations.set(0);
             return;
         }
         
@@ -278,9 +278,9 @@ public class Wal implements AutoCloseable {
         
         // Forzar escritura al disco solo una vez por batch
         channel.force(false);
-        pendingOperations = Math.max(0, pendingOperations - batch.size());
+        pendingOperations.set(Math.max(0, pendingOperations.get() - batch.size()));
         
-        logger.debug("Flushed {} entries to WAL (total pending: {})", batch.size(), pendingOperations);
+        logger.debug("Flushed {} entries to WAL (total pending: {})", batch.size(), pendingOperations.get());
     }
     
     /**
@@ -405,7 +405,7 @@ public class Wal implements AutoCloseable {
             channel.force(true); // Asegurar que todos los datos estén en disco
             channel.close();
             closed = true;
-            logger.info("WAL closed after flushing {} pending operations", pendingOperations);
+            logger.info("WAL closed after flushing {} pending operations", pendingOperations.get());
         }
     }
     
