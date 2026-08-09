@@ -50,6 +50,12 @@ public class DeskDB implements AutoCloseable {
         this.catalogManager = new CatalogManager(); // Initialize catalog manager
         this.inMemoryOnly = false;
         
+        // Validate that dbPath is not a directory
+        if (Files.exists(dbPath) && Files.isDirectory(dbPath)) {
+            throw new IOException("Database path '" + dbPath.toAbsolutePath() + "' is a directory, not a file. " +
+                    "Please provide a valid file path ending with .deskdb");
+        }
+        
         // Determinar ruta del WAL (mismo directorio que el archivo .deskdb)
         Path walPath = dbPath.resolveSibling(dbPath.getFileName().toString() + ".wal");
         
@@ -57,13 +63,23 @@ public class DeskDB implements AutoCloseable {
         this.wal = Wal.open(walPath);
         
         if (Files.exists(dbPath)) {
-            loadFromFile();
-            
-            // Recuperar desde WAL si existe
             try {
-                Transaction.recover(this, walPath);
-            } catch (Exception e) {
-                logger.warn("Recovery failed: {}", e.getMessage());
+                loadFromFile();
+                
+                // Recuperar desde WAL si existe
+                try {
+                    Transaction.recover(this, walPath);
+                } catch (Exception e) {
+                    logger.warn("Recovery failed: {}", e.getMessage());
+                }
+            } catch (IOException e) {
+                logger.error("Error loading existing data from {}: {}", dbPath.toAbsolutePath(), e.getMessage());
+                // Close WAL and rethrow to prevent opening a corrupted database
+                if (wal != null) {
+                    try { wal.close(); } catch (Exception ignore) {}
+                }
+                throw new IOException("Failed to load database from '" + dbPath.toAbsolutePath() + 
+                        "'. The file may be corrupted or is not a valid DeskDB file.", e);
             }
         } else {
             // Crear directorio padre si no existe
