@@ -57,13 +57,23 @@ public class DeskDB implements AutoCloseable {
         this.wal = Wal.open(walPath);
         
         if (Files.exists(dbPath)) {
-            loadFromFile();
-            
-            // Recuperar desde WAL si existe
             try {
-                Transaction.recover(this, walPath);
-            } catch (Exception e) {
-                logger.warn("Recovery failed: {}", e.getMessage());
+                loadFromFile();
+                
+                // Recuperar desde WAL si existe
+                try {
+                    Transaction.recover(this, walPath);
+                } catch (Exception e) {
+                    logger.warn("Recovery failed: {}", e.getMessage());
+                }
+            } catch (IOException e) {
+                logger.error("Error loading existing data from {}: {}", dbPath.toAbsolutePath(), e.getMessage());
+                // Close WAL and rethrow to prevent opening a corrupted database
+                if (wal != null) {
+                    try { wal.close(); } catch (Exception ignore) {}
+                }
+                throw new IOException("Failed to load database from '" + dbPath.toAbsolutePath() + 
+                        "'. The file may be corrupted or is not a valid DeskDB file.", e);
             }
         } else {
             // Crear directorio padre si no existe
@@ -141,11 +151,18 @@ public class DeskDB implements AutoCloseable {
     /**
      * Abre una base de datos DeskDB en la ruta especificada.
      *
-     * @param path Ruta al archivo .deskdb
+     * @param path Ruta al archivo .deskdb o directorio (si es directorio, se usará db.deskdb dentro)
      * @return Instancia de DeskDB
      * @throws IOException si hay un error de E/S
      */
     public static DeskDB open(Path path) throws IOException {
+        // Handle case where path is a directory - convert to file path inside that directory
+        if (Files.isDirectory(path)) {
+            Path newPath = path.resolve("db.deskdb");
+            logger.info("Path '{}' is a directory, using database file at '{}'", path.toAbsolutePath(), newPath.toAbsolutePath());
+            path = newPath;
+        }
+        
         if (!path.toString().endsWith(".deskdb")) {
             logger.warn("La ruta no termina en .deskdb, pero se procederá");
         }
