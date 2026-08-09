@@ -128,11 +128,13 @@ public class BTree<K extends Comparable<K>, V> {
         child.keyCount = mid;
         
         // Insertar la clave mediana en el padre
-        // Desplazar claves e hijos del padre para hacer espacio
+        // Desplazar claves, valores e hijos del padre para hacer espacio
         System.arraycopy(parent.keys, index, parent.keys, index + 1, parent.keyCount - index);
+        System.arraycopy(parent.values, index, parent.values, index + 1, parent.keyCount - index);
         System.arraycopy(parent.children, index + 1, parent.children, index + 2, parent.keyCount - index);
         
         parent.keys[index] = child.keys[mid];
+        parent.values[index] = child.values[mid];
         parent.children[index + 1] = newNode;
         parent.keyCount++;
     }
@@ -150,11 +152,8 @@ public class BTree<K extends Comparable<K>, V> {
         while (i < node.keyCount) {
             int cmp = key.compareTo((K) node.keys[i]);
             if (cmp == 0) {
-                if (node.isLeaf) {
-                    result.add(node.values[i]);
-                } else {
-                    search(node.children[i + 1], key, result);
-                }
+                // Key found: add the value from this node (works for both leaf and internal nodes)
+                result.add(node.values[i]);
                 return;
             } else if (cmp < 0) {
                 break;
@@ -460,18 +459,12 @@ public class BTree<K extends Comparable<K>, V> {
                 boolean matchesMax = (max == null) || (includeMax ? key.compareTo(max) <= 0 : key.compareTo(max) < 0);
                 
                 if (matchesMin && matchesMax) {
-                    // Crear entry con la lista de valores
+                    // Create entry with the value corresponding to the key at index i
                     List<Long> values = new ArrayList<>();
-                    for (int v = 0; v < node.values.length && node.values[v] != 0; v++) {
-                        if (((K) node.keys[i]).equals(key)) {
-                            values.add(node.values[v]);
-                        }
-                    }
+                    values.add(node.values[i]);
                     
-                    if (!values.isEmpty()) {
-                        Map.Entry<K, List<Long>> entry = new AbstractMap.SimpleEntry<>(key, values);
-                        visitor.visit(entry);
-                    }
+                    Map.Entry<K, List<Long>> entry = new AbstractMap.SimpleEntry<>(key, values);
+                    visitor.visit(entry);
                 }
                 
                 i++;
