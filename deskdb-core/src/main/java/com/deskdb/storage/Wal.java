@@ -322,10 +322,12 @@ public class Wal implements AutoCloseable {
         while (channel.position() < channel.size()) {
             try {
                 ByteBuffer buffer = ByteBuffer.allocate(4);
-                channel.read(buffer);
+                int bytesRead = channel.read(buffer);
                 
-                if (buffer.limit() < 4) {
-                    break; // Fin del archivo o entrada corrupta
+                // Check if we read less than 4 bytes (EOF or corruption)
+                if (bytesRead < 4) {
+                    logger.warn("WAL read: incomplete length header ({} bytes), possible corruption or EOF", bytesRead);
+                    break;
                 }
                 
                 buffer.flip();
@@ -337,7 +339,15 @@ public class Wal implements AutoCloseable {
                 }
                 
                 ByteBuffer entryBuffer = ByteBuffer.allocate(entryLength);
-                channel.read(entryBuffer);
+                int entryBytesRead = channel.read(entryBuffer);
+                
+                // Verify we read the complete entry
+                if (entryBytesRead != entryLength) {
+                    logger.warn("WAL read: incomplete entry (expected {} bytes, got {}), possible corruption", 
+                               entryLength, entryBytesRead);
+                    break;
+                }
+                
                 entryBuffer.flip();
                 
                 WalEntry entry = deserializeEntry(entryBuffer);

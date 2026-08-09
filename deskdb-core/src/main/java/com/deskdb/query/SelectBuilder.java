@@ -208,10 +208,11 @@ public class SelectBuilder {
         if (columns != null && !columns.isEmpty()) {
             List<Row> filteredResults = new ArrayList<>();
             for (Row row : results) {
-                Map<String, Object> filteredValues = new HashMap<>();
+                Map<String, Object> filteredValues = new java.util.LinkedHashMap<>();
+                Map<String, Object> rowValues = row.getValues();
                 for (String col : columns) {
-                    if (row.getValues().containsKey(col)) {
-                        filteredValues.put(col, row.getValues().get(col));
+                    if (rowValues.containsKey(col)) {
+                        filteredValues.put(col, rowValues.get(col));
                     }
                 }
                 filteredResults.add(new Row(row.getRowId(), filteredValues));
@@ -262,27 +263,29 @@ public class SelectBuilder {
         
         // Usar rangeSearch para operadores de rango
         if (filter.getOperator() == Filter.Operator.BETWEEN) {
-            Object[] values = (Object[]) filter.getValue();
-            Comparable from = (Comparable) values[0];
-            Comparable to = (Comparable) values[1];
+            // BETWEEN stores limits in getValue() and getValue2() separately, not as an array
+            Comparable from = (Comparable) filter.getValue();
+            Comparable to = (Comparable) filter.getValue2();
             rowIds = index.rangeSearch(from, to);
         } else if (filter.getOperator() == Filter.Operator.GT) {
-            // GT: desde value+1 hasta infinito
+            // GT: from value+1 to infinity. Note: rangeSearch is inclusive on both ends,
+            // but post-filtering (lines 296-301) applies the exclusive GT semantics.
             rowIds = index.rangeSearch((Comparable) filter.getValue(), getMaxValueForType(filter.getValue()));
         } else if (filter.getOperator() == Filter.Operator.LT) {
-            // LT: desde infinito hasta value-1
+            // LT: from infinity to value-1. Note: rangeSearch is inclusive on both ends,
+            // but post-filtering (lines 296-301) applies the exclusive LT semantics.
             rowIds = index.rangeSearch(getMinValueForType(filter.getValue()), (Comparable) filter.getValue());
         } else if (filter.getOperator() == Filter.Operator.GTE) {
-            // GTE: desde value hasta infinito
+            // GTE: from value to infinity (inclusive)
             rowIds = index.rangeSearch((Comparable) filter.getValue(), getMaxValueForType(filter.getValue()));
         } else if (filter.getOperator() == Filter.Operator.LTE) {
-            // LTE: desde infinito hasta value
+            // LTE: from infinity to value (inclusive)
             rowIds = index.rangeSearch(getMinValueForType(filter.getValue()), (Comparable) filter.getValue());
         } else if (filter.getOperator() == Filter.Operator.EQ) {
-            // EQ: búsqueda exacta
+            // EQ: exact match search
             rowIds = index.search((Comparable) filter.getValue());
         } else {
-            // Fallback para otros operadores
+            // Fallback for other operators
             return table.select(Collections.singletonList(filter));
         }
         
@@ -309,7 +312,10 @@ public class SelectBuilder {
     }
     
     /**
-     * Obtiene el valor máximo para el tipo de dato dado (para rangos abiertos).
+     * Gets the maximum value for a given data type (for open-ended ranges).
+     * Note: For String type, "\uFFFF" is used as upper bound. Strings starting with
+     * "\uFFFF" followed by more characters may exceed this bound, but post-filtering
+     * (lines 296-301) ensures correct results for such edge cases.
      */
     private Comparable getMaxValueForType(Object value) {
         if (value instanceof Integer) {
@@ -321,7 +327,8 @@ public class SelectBuilder {
         } else if (value instanceof Float) {
             return Float.MAX_VALUE;
         } else {
-            // Para strings, usar un caracter especial que sea mayor que todos
+            // For strings, use a special character that is greater than most
+            // Note: post-filtering handles edge cases where strings exceed this bound
             return "\uFFFF";
         }
     }

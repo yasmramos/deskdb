@@ -118,18 +118,11 @@ public class ColumnCompressorTest {
     @Test
     public void testNullSafety() {
         for (ColumnCompressor compressor : compressors) {
-            // Different compressors handle null differently based on implementation
-            if (compressor instanceof NoOpCompressor) {
-                // NoOpCompressor returns null for null input
-                assertNull(compressor.compress(null), "NoOpCompressor should return null for null input");
-                assertNull(compressor.decompress(null), "NoOpCompressor should return null for null input");
-            } else if (compressor instanceof RLECompressor || compressor instanceof DeltaCompressor) {
-                // RLE and Delta return empty array for null/empty input
-                assertArrayEquals(new byte[0], compressor.compress(null), 
-                    compressor.getName() + " should return empty array for null input");
-                assertArrayEquals(new byte[0], compressor.decompress(null), 
-                    compressor.getName() + " should return empty array for null input");
-            }
+            // All compressors now consistently return empty array for null input
+            assertArrayEquals(new byte[0], compressor.compress(null), 
+                compressor.getName() + " should return empty array for null input");
+            assertArrayEquals(new byte[0], compressor.decompress(null), 
+                compressor.getName() + " should return empty array for null input");
         }
     }
 

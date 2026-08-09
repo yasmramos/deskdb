@@ -7,6 +7,8 @@ import com.deskdb.core.storage.compression.CompressionUtils;
 import com.deskdb.core.storage.compression.RLECompressor;
 import com.deskdb.core.storage.compression.DeltaCompressor;
 import com.deskdb.core.storage.compression.NoOpCompressor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
 import java.util.*;
@@ -18,6 +20,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * Permite lecturas parciales eficientes.
  */
 public class ColumnStore {
+    private static final Logger logger = LoggerFactory.getLogger(ColumnStore.class);
     private final String tableName;
     private final List<String> columnNames;
     private final Map<String, DataType> columnTypes;
@@ -45,6 +48,7 @@ public class ColumnStore {
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
     private final AtomicLong rowCountCounter = new AtomicLong(0);
     private int rowCount = 0;
+    private int activeRowCount = 0; // Contador explícito de filas activas (no eliminadas)
     private final Map<Long, Boolean> deletedRows = Collections.synchronizedMap(new HashMap<>());
     private static final int COMPACTION_THRESHOLD = 10000; // Compactar cada 10k deletes
     private static final int COMPRESSION_SAMPLE_SIZE = 1000; // Muestrear cada 1000 filas para compresión
@@ -133,6 +137,7 @@ public class ColumnStore {
             // Registrar las posiciones globales de esta fila
             rowPositions.put(rowId, globalPositions);
             rowCount++;
+            activeRowCount++;
             
             // Actualizar offsets acumulados para búsqueda binaria (incremental, no invalidar cache)
             for (String colName : columnNames) {
@@ -268,16 +273,30 @@ public class ColumnStore {
     
     /**
      * Compacta filas eliminadas liberando espacio y reconstruyendo índices.
-     * Operación costosa que se ejecuta periódicamente cuando hay muchos deletes.
+     * 
+     * IMPORTANT: This method only clears the deletedRows map without actually
+     * removing data from rowPositions, columnIndexInverse, or ColumnBlocks.
+     * This is a temporary simplification. In a production implementation,
+     * compaction should:
+     * 1. Remove entries from rowPositions and columnIndexInverse for deleted rows
+     * 2. Rewrite ColumnBlocks to physically remove deleted row data
+     * 3. Only then clear deletedRows
+     * 
+     * The invariant is: a row can only be removed from deletedRows if its data
+     * is no longer reachable through any read path.
      */
     private void compactDeletedRows() {
-        // Implementación simplificada: solo limpiamos el mapa de deletedRows
-        // En una implementación completa, reescribiríamos los bloques para eliminar datos
+        // Temporary implementation: only clear deletedRows map
+        // WARNING: This makes all previously deleted rows appear as "alive" again
+        // A proper implementation must first remove data from rowPositions and columnIndexInverse
         synchronized (deletedRows) {
-            deletedRows.clear();
+            // Do NOT clear deletedRows until we implement proper data removal
+            // deletedRows.clear(); would make deleted rows visible again!
+            
+            // For now, we keep deletedRows intact to maintain correctness
+            // TODO: Implement full compaction that rewrites column blocks and updates indices
+            logger.debug("Compaction skipped: full implementation pending ({} deleted rows)", deletedRows.size());
         }
-        // Nota: Esto asume que los scans ya filtraron los rows eliminados antes de la compactación
-        // Una implementación completa debería reconstruir rowPositions y columnIndexInverse
     }
     
     /**
@@ -448,11 +467,14 @@ public class ColumnStore {
     public void delete(long rowId) {
         lock.writeLock().lock();
         try {
-            deletedRows.put(rowId, true);
-            // No decrementamos rowCount para evitar reutilización de IDs
-            // rowCount representa el total histórico de filas insertadas
-            // Nota: En una implementación completa, marcaríamos las celdas como eliminadas
-            // y haríamos compactación periódica.
+            // Only mark as deleted if not already deleted to avoid double counting
+            if (!deletedRows.containsKey(rowId)) {
+                deletedRows.put(rowId, true);
+                activeRowCount--; // Decrement active row count
+            }
+            // rowCount remains unchanged as it represents total historical inserts
+            // Note: In a full implementation, we would mark cells as deleted
+            // and perform periodic compaction.
         } finally {
             lock.writeLock().unlock();
         }
@@ -513,13 +535,14 @@ public class ColumnStore {
     }
     
     /**
-     * Retorna el número de filas activas (no eliminadas).
+     * Returns the number of active (non-deleted) rows.
+     * @return count of active rows
      */
     public int getRowCount() {
         lock.readLock().lock();
         try {
-            // Retornar el contador de filas menos las eliminadas
-            return rowCount - deletedRows.size();
+            // Use explicit active row counter that is maintained on insert/delete
+            return activeRowCount;
         } finally {
             lock.readLock().unlock();
         }
