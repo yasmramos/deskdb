@@ -351,7 +351,12 @@ public class Wal implements AutoCloseable {
                 entryBuffer.flip();
                 
                 WalEntry entry = deserializeEntry(entryBuffer);
-                entries.add(entry);
+                if (entry != null) {
+                    entries.add(entry);
+                } else {
+                    logger.warn("Skipping corrupted WAL entry at position {}", channel.position());
+                    break; // Detener reproducción ante corrupción
+                }
                 
             } catch (Exception e) {
                 logger.warn("Error al leer entrada WAL, posible corrupción: {}", e.getMessage());
@@ -561,24 +566,25 @@ public class Wal implements AutoCloseable {
         int calculatedChecksum = calculateChecksum(buffer);
         
         if (storedChecksum != calculatedChecksum) {
-            logger.warn("Checksum mismatch en entrada WAL");
+            logger.warn("Checksum mismatch en entrada WAL: stored=0x{:08X}, calculated=0x{:08X}", 
+                       Integer.toHexString(storedChecksum), Integer.toHexString(calculatedChecksum));
+            return null; // Señalar corrupción para que el llamador descarte esta entrada
         }
         
         return new WalEntry(timestamp, transactionId, operation, tableName, key, data);
     }
     
     private int calculateChecksum(ByteBuffer buffer) {
-        int checksum = 0;
+        java.util.zip.CRC32 crc = new java.util.zip.CRC32();
         int position = buffer.position();
         int limit = buffer.limit() - 4; // Excluir checksum almacenado
         
-        buffer.position(position);
-        for (int i = 0; i < limit - position; i++) {
-            checksum ^= (buffer.get() & 0xFF) << ((i % 4) * 8);
+        // Actualizar CRC con los bytes desde position hasta limit
+        for (int i = position; i < limit; i++) {
+            crc.update(buffer.get(i) & 0xFF);
         }
         
-        buffer.position(position);
-        return checksum;
+        return (int) crc.getValue();
     }
     
     /**
