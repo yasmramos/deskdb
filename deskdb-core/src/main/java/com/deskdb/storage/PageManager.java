@@ -151,22 +151,21 @@ public class PageManager {
     }
     
     /**
-     * Asigna una nueva página libre.
-     * Primero intenta reutilizar de la Free List, si está vacía asigna al final del archivo.
-     * Retorna el número de página asignada.
-     * Thread-safe: usa sincronización para evitar colisiones.
+     * Allocates a new page, reusing from Free List if available.
+     * Reused pages are completely cleared to prevent stale data corruption.
+     * Invariant: a page returned by allocatePage always has freshly initialized header and zeroed data.
      */
     public synchronized Page allocatePage() throws IOException {
-        // Intentar obtener de la Free List primero (más rápido que expandir archivo)
+        // Attempt to reuse from Free List first (faster than expanding file)
         Long freePageNumber = freePageList.poll();
         if (freePageNumber != null) {
-            // Reutilizar página existente
+            // Reuse existing page: clear all stale data before returning
             Page page = getPage(freePageNumber);
-            page.setFlags(0x00000000); // Marcar como usada
+            page.clear(); // Clear entire page content and reinitialize header
             return page;
         }
         
-        // Free List vacía: asignar nueva página al final del archivo
+        // Free List empty: allocate new page at end of file
         long newPageNumber = channel.size() / Page.PAGE_SIZE;
         return getPage(newPageNumber);
     }

@@ -47,21 +47,37 @@ public class Page {
         }
     }
     
-    private void initHeader() {
+    /**
+     * Clears the entire page content and reinitializes the header.
+     * This ensures reused pages from the Free List don't carry stale data.
+     * Should be called when allocating a previously freed page.
+     */
+    public void clear() {
         lock.writeLock().lock();
         try {
-            // Magic number: 0x4445534B ("DESK")
-            buffer.putInt(0, 0x4445534B);
-            // Version: 1
-            buffer.putInt(4, 1);
-            // Flags: 0 (disponible)
-            buffer.putInt(8, 0);
-            // Checksum: calcular después de escribir datos
-            buffer.putInt(12, 0);
+            // Zero out the entire page buffer
+            buffer.position(0);
+            for (int i = 0; i < PAGE_SIZE; i++) {
+                buffer.put((byte) 0);
+            }
+            // Reinitialize header with fresh values
+            initHeader();
             dirty = true;
         } finally {
             lock.writeLock().unlock();
         }
+    }
+    
+    private void initHeader() {
+        // Magic number: 0x4445534B ("DESK")
+        buffer.putInt(0, 0x4445534B);
+        // Version: 1
+        buffer.putInt(4, 1);
+        // Flags: 0 (disponible)
+        buffer.putInt(8, 0);
+        // Checksum: calcular después de escribir datos
+        buffer.putInt(12, 0);
+        dirty = true;
     }
     
     // Lecturas thread-safe
