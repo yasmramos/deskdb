@@ -145,6 +145,9 @@ public class ObjectStore {
                 .select()
                 .execute();
             
+            // Track max ID per class to restore idGenerators correctly
+            Map<String, Long> maxIdsPerClass = new ConcurrentHashMap<>();
+            
             for (var row : allRows) {
                 Object id = row.get("id");
                 String className = (String) row.get("class_name");
@@ -157,10 +160,21 @@ public class ObjectStore {
                         setIdOnEntity(entity, id);
                         cacheEntity(className, id, entity, 0);
                         classIndex.computeIfAbsent(className, k -> ConcurrentHashMap.newKeySet()).add(id);
+                        
+                        // Track max ID per class for generator restoration
+                        Long idValue = convertId(id);
+                        if (idValue != null) {
+                            maxIdsPerClass.merge(className, idValue, Math::max);
+                        }
                     }
                 } catch (ClassNotFoundException e) {
                     // Class not available, skip
                 }
+            }
+            
+            // Restore idGenerators to continue from max existing ID per class
+            for (Map.Entry<String, Long> entry : maxIdsPerClass.entrySet()) {
+                idGenerators.put(entry.getKey(), entry.getValue());
             }
         } catch (Exception e) {
             // Ignore errors on initial load
@@ -190,6 +204,8 @@ public class ObjectStore {
      */
     public <T> void persist(T entity, Object id) {
         String typeName = entity.getClass().getName();
+        // Set the ID on the entity if it has an @Id field (same as persist(T entity))
+        setIdOnEntity(entity, id);
         store(typeName, id, entity);
     }
 
@@ -391,20 +407,20 @@ public class ObjectStore {
                 .where("class_name").eq(typeName)
                 .execute();
             
-            Object rowIdToDelete = null;
+            Object entityIdToDelete = null;
             for (var row : results) {
                 Object entityId = row.get("id");
                 if (convertId(entityId).equals(convertId(id))) {
-                    rowIdToDelete = row.getRowId();
+                    entityIdToDelete = convertId(entityId);
                     break;
                 }
             }
             
             int deleted = 0;
-            if (rowIdToDelete != null) {
+            if (entityIdToDelete != null) {
                 deleted = db.table(INTERNAL_TABLE_NAME)
                     .delete()
-                    .where("id").eq(rowIdToDelete)
+                    .where("id").eq(entityIdToDelete)
                     .execute();
             }
             
@@ -465,21 +481,21 @@ public class ObjectStore {
                 .where("class_name").eq(typeName)
                 .execute();
             
-            Object rowIdToUpdate = null;
+            Object entityIdToUpdate = null;
             for (var row : results) {
                 Object entityId = row.get("id");
                 if (convertId(entityId).equals(convertId(id))) {
-                    rowIdToUpdate = row.getRowId();
+                    entityIdToUpdate = convertId(entityId);
                     break;
                 }
             }
             
             int updated = 0;
-            if (rowIdToUpdate != null) {
+            if (entityIdToUpdate != null) {
                 updated = db.table(INTERNAL_TABLE_NAME)
                     .update()
                     .set("data", data)
-                    .where("id").eq(rowIdToUpdate)
+                    .where("id").eq(entityIdToUpdate)
                     .execute();
             }
             
@@ -570,7 +586,7 @@ public class ObjectStore {
                         convertedEntityId.equals(convertedId)) {
                         db.table(INTERNAL_TABLE_NAME, tx)
                             .delete()
-                            .where("id").eq(row.getRowId())
+                            .where("id").eq(convertedId)
                             .execute();
                         break;
                     }
@@ -709,6 +725,12 @@ public class ObjectStore {
     
     /**
      * Converts ID to Long format for database storage.
+     * 
+     * WARNING: When the ID is a non-parseable String, this method uses hashCode() which
+     * produces a 32-bit value. This creates a risk of hash collisions when using String IDs.
+     * For applications requiring reliable String key support, consider using UUID IDs or
+     * implementing a collision-free mapping strategy (e.g., maintaining a separate String->Long
+     * mapping table with full 64-bit hash or sequential IDs).
      */
     private Long convertId(Object id) {
         if (id == null) return null;
@@ -719,6 +741,7 @@ public class ObjectStore {
                 return Long.parseLong((String) id);
             } catch (NumberFormatException e) {
                 // Hash the string if not parseable
+                // WARNING: Using hashCode() creates collision risk for 32-bit values
                 return (long) ((String) id).hashCode();
             }
         }
@@ -820,10 +843,13 @@ public class ObjectStore {
             
             for (var row : existingResults) {
                 Object entityId = row.get("id");
-                if (convertId(entityId).equals(convertId(id))) {
+                Long convertedEntityId = convertId(entityId);
+                Long convertedId = convertId(id);
+                if (convertedEntityId != null && convertedId != null && 
+                    convertedEntityId.equals(convertedId)) {
                     db.table(INTERNAL_TABLE_NAME)
                         .delete()
-                        .where("id").eq(row.getRowId())
+                        .where("id").eq(convertedId)
                         .execute();
                     break;
                 }

@@ -281,20 +281,16 @@ public class Transaction implements AutoCloseable {
                     }
                 }
                 
-                // Escribir COMMIT en WAL
-                wal.writeCommit(transactionId);
+                // Escribir COMMIT en WAL según nivel de WriteConcern
+                // SAFE: fsync inmediato para durabilidad estricta
+                // NORMAL: bufferizado para group commit (fsync batcheado)
+                // ASYNC: bufferizado sin fsync (solo memoria del SO)
+                boolean forceSync = (writeConcern == WriteConcern.SAFE);
+                wal.writeCommit(transactionId, forceSync);
                 
-                // Apply write concern: flush based on durability level
-                if (writeConcern == WriteConcern.SAFE) {
-                    wal.flush(); // Force fsync for SAFE mode
-                } else if (writeConcern == WriteConcern.NORMAL) {
-                    // Batch flush - let the background thread handle it
-                    // Only flush if batch is large enough
-                    if (implicitTxBuffer.size() >= 50) {
-                        wal.flush();
-                    }
-                }
-                // ASYNC mode: no flush, data stays in OS buffer
+                // Para NORMAL mode, el flush periódico se encarga de persistir los commits bufferizados
+                // El thread de background en Wal.startPeriodicFlush() hace flush cada FLUSH_INTERVAL_MS
+                
             } catch (IOException e) {
                 logger.error("Failed to write to WAL during commit: {}", e.getMessage());
                 throw new RuntimeException("WAL write failed", e);

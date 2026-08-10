@@ -27,57 +27,61 @@ public class EntityValidator {
         
         Class<?> clazz = entity.getClass();
         
-        // Check all fields
-        for (Field field : clazz.getDeclaredFields()) {
-            field.setAccessible(true);
-            Object value = field.get(entity);
-            
-            // @NotNull validation
-            if (field.isAnnotationPresent(NotNull.class)) {
-                NotNull notNull = field.getAnnotation(NotNull.class);
-                if (value == null) {
-                    errors.add(notNull.message());
-                }
-            }
-            
-            // @Size validation (for Strings and Collections)
-            if (field.isAnnotationPresent(Size.class)) {
-                Size size = field.getAnnotation(Size.class);
+        // Check all fields including inherited ones by traversing the class hierarchy
+        Class<?> currentClass = clazz;
+        while (currentClass != null && currentClass != Object.class) {
+            for (Field field : currentClass.getDeclaredFields()) {
+                field.setAccessible(true);
+                Object value = field.get(entity);
                 
-                if (value instanceof String) {
-                    int length = ((String) value).length();
-                    if (length < size.min() || length > size.max()) {
-                        errors.add(size.message());
+                // @NotNull validation
+                if (field.isAnnotationPresent(NotNull.class)) {
+                    NotNull notNull = field.getAnnotation(NotNull.class);
+                    if (value == null) {
+                        errors.add(notNull.message());
                     }
-                } else if (value instanceof Collection) {
-                    int collectionSize = ((Collection<?>) value).size();
-                    if (collectionSize < size.min() || collectionSize > size.max()) {
-                        errors.add(size.message());
+                }
+                
+                // @Size validation (for Strings and Collections)
+                if (field.isAnnotationPresent(Size.class)) {
+                    Size size = field.getAnnotation(Size.class);
+                    
+                    if (value instanceof String) {
+                        int length = ((String) value).length();
+                        if (length < size.min() || length > size.max()) {
+                            errors.add(size.message());
+                        }
+                    } else if (value instanceof Collection) {
+                        int collectionSize = ((Collection<?>) value).size();
+                        if (collectionSize < size.min() || collectionSize > size.max()) {
+                            errors.add(size.message());
+                        }
+                    }
+                }
+                
+                // @Min validation (for numeric types)
+                if (field.isAnnotationPresent(Min.class)) {
+                    Min min = field.getAnnotation(Min.class);
+                    if (value instanceof Number) {
+                        double numValue = ((Number) value).doubleValue();
+                        if (numValue < min.value()) {
+                            errors.add(min.message().replace("{value}", String.valueOf(min.value())));
+                        }
+                    }
+                }
+                
+                // @Max validation (for numeric types)
+                if (field.isAnnotationPresent(Max.class)) {
+                    Max max = field.getAnnotation(Max.class);
+                    if (value instanceof Number) {
+                        double numValue = ((Number) value).doubleValue();
+                        if (numValue > max.value()) {
+                            errors.add(max.message().replace("{value}", String.valueOf(max.value())));
+                        }
                     }
                 }
             }
-            
-            // @Min validation (for numeric types)
-            if (field.isAnnotationPresent(Min.class)) {
-                Min min = field.getAnnotation(Min.class);
-                if (value instanceof Number) {
-                    long numValue = ((Number) value).longValue();
-                    if (numValue < min.value()) {
-                        errors.add(min.message().replace("{value}", String.valueOf(min.value())));
-                    }
-                }
-            }
-            
-            // @Max validation (for numeric types)
-            if (field.isAnnotationPresent(Max.class)) {
-                Max max = field.getAnnotation(Max.class);
-                if (value instanceof Number) {
-                    long numValue = ((Number) value).longValue();
-                    if (numValue > max.value()) {
-                        errors.add(max.message().replace("{value}", String.valueOf(max.value())));
-                    }
-                }
-            }
+            currentClass = currentClass.getSuperclass();
         }
         
         return errors;

@@ -284,16 +284,32 @@ public class Wal implements AutoCloseable {
     }
     
     /**
-     * Escribe una operación de commit con flush inmediato para garantizar durabilidad
+     * Escribe una operación de commit con opción de flush inmediato según nivel de durabilidad.
+     * @param transactionId el ID de la transacción
+     * @param forceSync si true, fuerza fsync inmediato (modo SAFE); si false, bufferiza para group commit (modo NORMAL/ASYNC)
+     * @throws IOException si ocurre un error de E/S
      */
-    public synchronized void writeCommit(long transactionId) throws IOException {
+    public synchronized void writeCommit(long transactionId, boolean forceSync) throws IOException {
         // Escribir COMMIT como entrada normal (se bufferiza)
         write(transactionId, OperationType.COMMIT, "", "", new byte[0]);
         
-        // Forzar flush inmediato para garantizar que el commit esté en disco
-        doFlush();
-        
-        logger.info("Transaction {} committed to WAL", transactionId);
+        // Forzar flush inmediato solo si se requiere durabilidad estricta (SAFE mode)
+        if (forceSync) {
+            doFlush();
+            logger.info("Transaction {} committed to WAL (fsync immediate)", transactionId);
+        } else {
+            logger.debug("Transaction {} committed to WAL (buffered for group commit)", transactionId);
+        }
+    }
+    
+    /**
+     * Escribe una operación de commit con flush inmediato para garantizar durabilidad (compatibilidad).
+     * Delega en writeCommit(transactionId, true) para preservar comportamiento anterior.
+     * @param transactionId el ID de la transacción
+     * @throws IOException si ocurre un error de E/S
+     */
+    public synchronized void writeCommit(long transactionId) throws IOException {
+        writeCommit(transactionId, true);
     }
     
     /**
