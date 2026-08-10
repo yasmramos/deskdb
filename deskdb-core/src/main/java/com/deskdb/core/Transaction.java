@@ -25,6 +25,7 @@ public class Transaction implements AutoCloseable {
     private final Map<String, Map<Long, Row>> snapshots = new HashMap<>();
     private final Map<String, Map<Long, Row>> pendingChanges = new HashMap<>();
     private final Map<String, Long> nextRowIds = new HashMap<>();
+    private final Map<String, Map<Long, OperationType>> operationTypes = new HashMap<>(); // Track INSERT/UPDATE/DELETE
     private boolean committed = false;
     private final Wal wal;
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
@@ -169,6 +170,8 @@ public class Transaction implements AutoCloseable {
                         // Escribir operaciones de esta transacción
                         for (Map.Entry<String, Map<Long, Row>> entry : tx.pendingChanges.entrySet()) {
                             String tableName = entry.getKey();
+                            Map<Long, OperationType> opTypeMap = tx.operationTypes.getOrDefault(tableName, new HashMap<>());
+                            
                             for (Map.Entry<Long, Row> changeEntry : entry.getValue().entrySet()) {
                                 OperationType opType;
                                 byte[] data = new byte[0];
@@ -177,14 +180,9 @@ public class Transaction implements AutoCloseable {
                                     opType = OperationType.DELETE;
                                 } else {
                                     Row row = changeEntry.getValue();
-                                    Map<Long, Row> snapshot = tx.snapshots.getOrDefault(tableName, new HashMap<>());
-                                    if (!snapshot.containsKey(changeEntry.getKey())) {
-                                        opType = OperationType.INSERT;
-                                        data = com.deskdb.util.Serializer.serialize(row.getValues());
-                                    } else {
-                                        opType = OperationType.UPDATE;
-                                        data = com.deskdb.util.Serializer.serialize(row.getValues());
-                                    }
+                                    // Use tracked operation type instead of snapshot lookup
+                                    opType = opTypeMap.getOrDefault(changeEntry.getKey(), OperationType.UPDATE);
+                                    data = com.deskdb.util.Serializer.serialize(row.getValues());
                                 }
                                 
                                 wal.write(tx.transactionId, opType, tableName, String.valueOf(changeEntry.getKey()), data);
@@ -194,19 +192,13 @@ public class Transaction implements AutoCloseable {
                         // Escribir COMMIT para esta transacción
                         wal.write(tx.transactionId, OperationType.COMMIT, "", "", new byte[0]);
                         
-                        // Aplicar cambios a las tablas
+                        // Aplicar cambios a las tablas usando batch operations
                         for (Map.Entry<String, Map<Long, Row>> entry : tx.pendingChanges.entrySet()) {
                             String tableName = entry.getKey();
                             Table table = tx.db.getTable(tableName);
                             if (table != null) {
-                                Map<Long, Row> tableData = table.getData();
-                                for (Map.Entry<Long, Row> changeEntry : entry.getValue().entrySet()) {
-                                    if (changeEntry.getValue() == null) {
-                                        tableData.remove(changeEntry.getKey());
-                                    } else {
-                                        tableData.put(changeEntry.getKey(), changeEntry.getValue());
-                                    }
-                                }
+                                // Apply all changes for this table in a single batch operation
+                                table.applyBatch(entry.getValue(), tx.operationTypes.getOrDefault(tableName, new HashMap<>()));
                             }
                         }
                         
@@ -256,6 +248,8 @@ public class Transaction implements AutoCloseable {
             try {
                 for (Map.Entry<String, Map<Long, Row>> entry : pendingChanges.entrySet()) {
                     String tableName = entry.getKey();
+                    Map<Long, OperationType> opTypeMap = operationTypes.getOrDefault(tableName, new HashMap<>());
+                    
                     for (Map.Entry<Long, Row> changeEntry : entry.getValue().entrySet()) {
                         OperationType opType;
                         byte[] data = new byte[0];
@@ -265,16 +259,9 @@ public class Transaction implements AutoCloseable {
                             opType = OperationType.DELETE;
                         } else {
                             Row row = changeEntry.getValue();
-                            Map<Long, Row> snapshot = snapshots.getOrDefault(tableName, new HashMap<>());
-                            if (!snapshot.containsKey(changeEntry.getKey())) {
-                                // Inserción
-                                opType = OperationType.INSERT;
-                                data = com.deskdb.util.Serializer.serialize(row.getValues());
-                            } else {
-                                // Actualización
-                                opType = OperationType.UPDATE;
-                                data = com.deskdb.util.Serializer.serialize(row.getValues());
-                            }
+                            // Use tracked operation type instead of snapshot lookup
+                            opType = opTypeMap.getOrDefault(changeEntry.getKey(), OperationType.UPDATE);
+                            data = com.deskdb.util.Serializer.serialize(row.getValues());
                         }
                         
                         wal.write(transactionId, opType, tableName, String.valueOf(changeEntry.getKey()), data);
@@ -297,43 +284,13 @@ public class Transaction implements AutoCloseable {
             }
         }
         
-        // Aplicar cambios pendientes a las tablas reales
+        // Aplicar cambios pendientes a las tablas reales usando batch operations
         for (Map.Entry<String, Map<Long, Row>> entry : pendingChanges.entrySet()) {
             String tableName = entry.getKey();
             Table table = db.getTable(tableName);
             if (table != null) {
-                Map<Long, Row> tableData = table.getData();
-                
-                // Procesar todos los cambios
-                for (Map.Entry<Long, Row> changeEntry : entry.getValue().entrySet()) {
-                    if (changeEntry.getValue() == null) {
-                        // Eliminación - remover de datos y actualizar índices
-                        Row removedRow = tableData.remove(changeEntry.getKey());
-                        if (removedRow != null) {
-                            // Eliminar de todos los índices
-                            table.removeFromIndexes(removedRow, changeEntry.getKey());
-                        }
-                    } else {
-                        // Inserción o actualización
-                        Row newRow = changeEntry.getValue();
-                        Map<Long, Row> snapshot = snapshots.getOrDefault(tableName, new HashMap<>());
-                        
-                        if (!snapshot.containsKey(changeEntry.getKey())) {
-                            // Nueva inserción
-                            tableData.put(changeEntry.getKey(), newRow);
-                            // Insertar en índices
-                            table.insertIntoIndexes(newRow, changeEntry.getKey());
-                        } else {
-                            // Actualización - remover viejo valor de índices e insertar nuevo
-                            Row oldRow = tableData.get(changeEntry.getKey());
-                            if (oldRow != null) {
-                                table.removeFromIndexes(oldRow, changeEntry.getKey());
-                            }
-                            tableData.put(changeEntry.getKey(), newRow);
-                            table.insertIntoIndexes(newRow, changeEntry.getKey());
-                        }
-                    }
-                }
+                // Apply all changes for this table in a single batch operation
+                table.applyBatch(entry.getValue(), operationTypes.getOrDefault(tableName, new HashMap<>()));
             }
         }
     }
@@ -385,37 +342,56 @@ public class Transaction implements AutoCloseable {
      * Applies a pending change to this transaction.
      */
     public void applyChange(String tableName, long rowId, Row row) {
-        // Initialize snapshot with current table data if not exists
-        if (!snapshots.containsKey(tableName)) {
-            Table table = db.getTable(tableName);
-            if (table != null) {
-                // Copy current table data to snapshot
-                snapshots.put(tableName, new HashMap<>(table.getData()));
-            } else {
-                snapshots.put(tableName, new HashMap<>());
-            }
+        // Track operation type at apply time to avoid O(N) snapshot copy
+        Map<Long, OperationType> opTypeMap = operationTypes.computeIfAbsent(tableName, k -> new HashMap<>());
+        
+        // Initialize pendingChanges map if not exists (no snapshot copy needed)
+        if (!pendingChanges.containsKey(tableName)) {
+            pendingChanges.put(tableName, new HashMap<>());
         }
         
-        Map<Long, Row> changes = pendingChanges.computeIfAbsent(tableName, k -> new HashMap<>());
+        Map<Long, Row> changes = pendingChanges.get(tableName);
         if (row == null) {
             // Mark as null to indicate deletion on commit
             changes.put(rowId, null);
+            opTypeMap.put(rowId, OperationType.DELETE);
         } else {
             // If rowId is 0, it's a new insert - assign unique ID
             if (rowId == 0) {
                 long nextId = nextRowIds.computeIfAbsent(tableName, k -> {
-                    // Start from current table size + 1 to avoid conflicts
-                    Table table = db.getTable(tableName);
+                    // Use Table's nextRowId for consistency with direct inserts
                     long startId = 1L;
-                    if (table != null) {
-                        startId = table.getData().size() + 1L;
+                    if (!db.isClosed()) {
+                        Table table = db.getTable(tableName);
+                        if (table != null) {
+                            // Get current max from table's internal counter
+                            startId = table.getNextRowId();
+                        }
                     }
                     return startId;
                 });
                 Row newRow = new Row(nextId, row.getValues());
                 changes.put(nextId, newRow);
+                opTypeMap.put(nextId, OperationType.INSERT);
                 nextRowIds.put(tableName, nextId + 1);
             } else {
+                // Check if this is an INSERT or UPDATE based on whether the row exists in the table
+                boolean existsInTable = false;
+                if (!db.isClosed()) {
+                    Table table = db.getTable(tableName);
+                    existsInTable = (table != null && table.getData().containsKey(rowId));
+                }
+                boolean wasInsertedInThisTx = pendingChanges.getOrDefault(tableName, new HashMap<>()).containsKey(rowId);
+                
+                if (!existsInTable && !wasInsertedInThisTx) {
+                    opTypeMap.put(rowId, OperationType.INSERT);
+                } else if (wasInsertedInThisTx && changes.get(rowId) != null) {
+                    // Was inserted in this transaction, keep as INSERT
+                    opTypeMap.put(rowId, OperationType.INSERT);
+                } else {
+                    opTypeMap.put(rowId, OperationType.UPDATE);
+                }
+                
                 changes.put(rowId, row);
             }
         }
@@ -492,9 +468,6 @@ public class Transaction implements AutoCloseable {
                 } catch (IOException e) {
                     logger.error("Error replaying entry: {}", e.getMessage());
                     throw e; // Re-lanzar para que el caller lo maneje
-                } catch (ClassNotFoundException e) {
-                    logger.error("Class not found during recovery: {}", e.getMessage());
-                    throw new IOException("Deserialization failed", e);
                 }
             }
         }
@@ -503,52 +476,58 @@ public class Transaction implements AutoCloseable {
     }
     
     /**
-     * Ejecuta un SELECT dentro de esta transacción, leyendo desde el snapshot + cambios pendientes.
+     * Ejecuta un SELECT dentro de esta transacción, leyendo desde el estado actual + cambios pendientes.
+     * OPTIMIZACIÓN: No se copia el snapshot completo. Se lee directamente de la tabla y se aplican
+     * los cambios pendientes en memoria.
      */
     public List<Row> select(String tableName, List<Filter> filters) throws Exception {
-        // Para transacciones implícitas, inicializar snapshot si no existe
-        if (isImplicit && !snapshots.containsKey(tableName)) {
-            Table table = db.getTable(tableName);
-            if (table != null) {
-                snapshots.put(tableName, new HashMap<>(table.getData()));
-            } else {
-                snapshots.put(tableName, new HashMap<>());
-            }
-        }
-        
-        Map<Long, Row> snapshot = snapshots.getOrDefault(tableName, new HashMap<>());
+        Table table = db.getTable(tableName);
+        Map<Long, Row> baseData = (table != null) ? table.getData() : new HashMap<>();
         Map<Long, Row> changes = pendingChanges.getOrDefault(tableName, new HashMap<>());
         
-        // Combinar snapshot con cambios pendientes
-        Map<Long, Row> effectiveData = new HashMap<>(snapshot);
+        // Combinar datos base con cambios pendientes sin copiar todo el snapshot
+        // Solo creamos un mapa efectivo con las filas que vamos a leer
+        Map<Long, Row> effectiveData;
         
-        // Aplicar todos los cambios (ya tienen IDs únicos asignados en applyChange)
-        for (Map.Entry<Long, Row> entry : changes.entrySet()) {
-            if (entry.getValue() == null) {
-                // Eliminación
-                effectiveData.remove(entry.getKey());
-            } else {
-                // Inserción o actualización
-                effectiveData.put(entry.getKey(), entry.getValue());
-            }
-        }
-        
-        // Aplicar filtros
-        List<Row> result = new ArrayList<>();
-        for (Row row : effectiveData.values()) {
-            boolean matches = true;
-            if (filters != null) {
-                for (Filter f : filters) {
-                    if (!f.apply(row)) {
-                        matches = false;
-                        break;
-                    }
+        if (filters == null || filters.isEmpty()) {
+            // SELECT *: necesitamos todas las filas
+            effectiveData = new HashMap<>(baseData);
+            for (Map.Entry<Long, Row> entry : changes.entrySet()) {
+                if (entry.getValue() == null) {
+                    effectiveData.remove(entry.getKey());
+                } else {
+                    effectiveData.put(entry.getKey(), entry.getValue());
                 }
             }
-            if (matches) {
-                result.add(row);
+            return new ArrayList<>(effectiveData.values());
+        } else {
+            // SELECT con filtros: evaluamos sobre la combinación sin materializar todo
+            List<Row> result = new ArrayList<>();
+            
+            // Primero aplicar cambios pendientes que coincidan
+            for (Map.Entry<Long, Row> entry : changes.entrySet()) {
+                if (entry.getValue() != null && matchesAllFilters(entry.getValue(), filters)) {
+                    result.add(entry.getValue());
+                }
+            }
+            
+            // Luego filas base no modificadas por la transacción
+            for (Map.Entry<Long, Row> entry : baseData.entrySet()) {
+                if (!changes.containsKey(entry.getKey()) && matchesAllFilters(entry.getValue(), filters)) {
+                    result.add(entry.getValue());
+                }
+            }
+            
+            return result;
+        }
+    }
+    
+    private boolean matchesAllFilters(Row row, List<Filter> filters) {
+        for (Filter f : filters) {
+            if (!f.apply(row)) {
+                return false;
             }
         }
-        return result;
+        return true;
     }
 }

@@ -2,6 +2,7 @@ package com.deskdb.core;
 
 import com.deskdb.query.*;
 import com.deskdb.index.BTree;
+import com.deskdb.storage.Wal.OperationType;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -31,6 +32,17 @@ public class Table {
     private long nextRowId = 1;
     private final Object lock = new Object();
     private DeskDB db;
+    
+    /**
+     * Get the next row ID that will be assigned.
+     * Used by Transaction to ensure consistent ID generation.
+     * @return the next row ID value
+     */
+    public long getNextRowId() {
+        synchronized (lock) {
+            return nextRowId;
+        }
+    }
     
     // Version Manager for Time Travel support
     private final VersionManager versionManager = new VersionManager();
@@ -479,6 +491,73 @@ public class Table {
                 Object val = row.get(entry.getKey());
                 if (val != null) {
                     indexes.get(entry.getValue()).insert((Comparable) val, rowId);
+                }
+            }
+        }
+    }
+    
+    /**
+     * Applies a batch of changes to this table in a single lock acquisition.
+     * This reduces locking overhead compared to per-row operations.
+     * 
+     * @param changes map of rowId to Row (null for deletions)
+     * @param opTypeMap map of rowId to operation type (INSERT/UPDATE/DELETE)
+     */
+    void applyBatch(Map<Long, Row> changes, Map<Long, OperationType> opTypeMap) {
+        synchronized (lock) {
+            // First pass: handle deletions and updates (remove old values from indexes)
+            for (Map.Entry<Long, Row> changeEntry : changes.entrySet()) {
+                long rowId = changeEntry.getKey();
+                Row newRow = changeEntry.getValue();
+                
+                if (newRow == null) {
+                    // DELETE: remove from data and indexes
+                    Row removedRow = data.remove(rowId);
+                    if (removedRow != null) {
+                        invalidateCache(rowId);
+                        // Remove from all indexes
+                        for (Map.Entry<String, String> entry : columnToIndex.entrySet()) {
+                            Object val = removedRow.get(entry.getKey());
+                            if (val != null) {
+                                indexes.get(entry.getValue()).delete((Comparable) val, rowId);
+                            }
+                        }
+                    }
+                } else {
+                    OperationType opType = opTypeMap.getOrDefault(rowId, OperationType.UPDATE);
+                    
+                    if (opType == OperationType.UPDATE) {
+                        // UPDATE: remove old value from indexes
+                        Row oldRow = data.get(rowId);
+                        if (oldRow != null) {
+                            invalidateCache(rowId);
+                            for (Map.Entry<String, String> entry : columnToIndex.entrySet()) {
+                                Object oldVal = oldRow.get(entry.getKey());
+                                if (oldVal != null) {
+                                    indexes.get(entry.getValue()).delete((Comparable) oldVal, rowId);
+                                }
+                            }
+                        }
+                    }
+                    // INSERT doesn't need to remove anything
+                }
+            }
+            
+            // Second pass: insert new/updated rows into data and indexes
+            for (Map.Entry<Long, Row> changeEntry : changes.entrySet()) {
+                long rowId = changeEntry.getKey();
+                Row newRow = changeEntry.getValue();
+                
+                if (newRow != null) {
+                    // INSERT or UPDATE: add to data and indexes
+                    data.put(rowId, newRow);
+                    // Insert into all indexes
+                    for (Map.Entry<String, String> entry : columnToIndex.entrySet()) {
+                        Object val = newRow.get(entry.getKey());
+                        if (val != null) {
+                            indexes.get(entry.getValue()).insert((Comparable) val, rowId);
+                        }
+                    }
                 }
             }
         }
