@@ -558,6 +558,11 @@ public class Table {
                             indexes.get(entry.getValue()).insert((Comparable) val, rowId);
                         }
                     }
+                    // Update nextRowId if this is an INSERT with a high rowId
+                    OperationType opType = opTypeMap.getOrDefault(rowId, OperationType.UPDATE);
+                    if (opType == OperationType.INSERT && rowId >= nextRowId) {
+                        nextRowId = rowId + 1;
+                    }
                 }
             }
         }

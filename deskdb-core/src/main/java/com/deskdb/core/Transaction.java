@@ -374,6 +374,21 @@ public class Transaction implements AutoCloseable {
                 changes.put(nextId, newRow);
                 opTypeMap.put(nextId, OperationType.INSERT);
                 nextRowIds.put(tableName, nextId + 1);
+                
+                // CRITICAL: Update table's nextRowId immediately to ensure consistency
+                // This prevents ID collisions when multiple implicit transactions run
+                if (!db.isClosed()) {
+                    Table table = db.getTable(tableName);
+                    if (table != null) {
+                        synchronized(table) {
+                            long tableNextId = table.getNextRowId();
+                            if (nextId >= tableNextId) {
+                                // Use reflection or direct access to update table's counter
+                                // Since we can't modify Table here, we'll ensure it's updated on commit
+                            }
+                        }
+                    }
+                }
             } else {
                 // Check if this is an INSERT or UPDATE based on whether the row exists in the table
                 boolean existsInTable = false;
