@@ -15,21 +15,22 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.CRC32;
 
 /**
- * Write-Ahead Log (WAL) optimizado para alto rendimiento.
+ * Write-Ahead Log (WAL) optimized for high performance.
  * 
- * Mejoras implementadas:
- * 1. Buffer de escrituras para agrupar operaciones
- * 2. Flush asíncrono en background thread
- * 3. Commit batching para reducir fsync calls
- * 4. Eliminación de sincronización excesiva
+ * Improvements implemented:
+ * 1. Write buffering to batch operations
+ * 2. Async flush in background thread using ScheduledExecutorService for deterministic scheduling
+ * 3. Commit batching to reduce fsync calls
+ * 4. Elimination of excessive synchronization
+ * 5. Complete buffer drainage per flush cycle to reduce variance
  */
 public class Wal implements AutoCloseable {
     private static final Logger logger = LoggerFactory.getLogger(Wal.class);
@@ -56,7 +57,7 @@ public class Wal implements AutoCloseable {
     
     // Buffer de escrituras pendientes
     private final BlockingQueue<WalEntry> writeBuffer;
-    private final ExecutorService flushExecutor;
+    private final ScheduledExecutorService flushExecutor;
     private final AtomicBoolean flushScheduled;
     private volatile boolean needsForce = false;
     
@@ -137,17 +138,17 @@ public class Wal implements AutoCloseable {
             position = channel.size();
         }
         
-        // Inicializar buffer y executor para flush asíncrono
+        // Initialize buffer and executor for async flush using ScheduledExecutorService for deterministic scheduling
         this.writeBuffer = new ArrayBlockingQueue<>(DEFAULT_BUFFER_SIZE);
-        this.flushExecutor = Executors.newSingleThreadExecutor(r -> {
+        this.flushExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "WAL-Flush-Thread");
             t.setDaemon(true);
             return t;
         });
         this.flushScheduled = new AtomicBoolean(false);
         
-        // No iniciar thread de flush periódico para evitar problemas en tests
-        // El flush se hará de forma síncrona cuando sea necesario
+        // Do not start periodic flush thread to avoid issues in tests
+        // Flush will be performed synchronously when needed
         
         logger.info("WAL initialized at {} (sync mode)", walPath.toAbsolutePath());
     }
@@ -218,17 +219,13 @@ public class Wal implements AutoCloseable {
     }
     
     /**
-     * Programa un flush asíncrono si no hay uno pendiente
+     * Schedules an async flush if none is pending.
+     * Uses ScheduledExecutorService.schedule() with FLUSH_INTERVAL_MS delay for deterministic group commit batching.
+     * This eliminates the non-deterministic Thread.sleep(1) jitter that caused benchmark variance.
      */
     private void scheduleFlush() {
         if (flushScheduled.compareAndSet(false, true)) {
-            flushExecutor.submit(() -> {
-                try {
-                    // Pequeño delay para agrupar más operaciones
-                    Thread.sleep(1);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
+            flushExecutor.schedule(() -> {
                 try {
                     doFlush();
                 } catch (IOException e) {
@@ -236,51 +233,54 @@ public class Wal implements AutoCloseable {
                 } finally {
                     flushScheduled.set(false);
                 }
-            });
+            }, FLUSH_INTERVAL_MS, TimeUnit.MILLISECONDS);
         }
     }
     
     /**
-     * Realiza el flush de todas las entradas bufferizadas al disco con batching optimizado
+     * Performs flush of all buffered entries to disk with optimized batching.
+     * Drains the buffer completely in a loop to ensure all pending entries are processed in one flush cycle,
+     * reducing variance by avoiding partial flushes that leave entries waiting for the next cycle.
      */
     private synchronized void doFlush() throws IOException {
         if (writeBuffer.isEmpty() && pendingOperations.get() == 0) {
             return;
         }
         
+        // Drain and process all entries in the buffer in a loop to ensure complete drainage per flush cycle
+        int totalFlushed = 0;
         List<WalEntry> batch = new ArrayList<>();
-        writeBuffer.drainTo(batch, BATCH_COMMIT_THRESHOLD);
         
-        // Skip flush if batch is too small (unless we have pending operations waiting)
-        if (batch.size() < MIN_BATCH_SIZE && pendingOperations.get() > BATCH_COMMIT_THRESHOLD) {
-            return; // Wait for more entries to accumulate
+        while (!writeBuffer.isEmpty()) {
+            batch.clear();
+            writeBuffer.drainTo(batch, BATCH_COMMIT_THRESHOLD);
+            
+            if (batch.isEmpty()) {
+                break;
+            }
+            
+            // Write all entries in the batch
+            for (WalEntry entry : batch) {
+                ByteBuffer buffer = serializeEntry(entry);
+                channel.position(position);
+                channel.write(buffer);
+                position += buffer.limit();
+            }
+            
+            totalFlushed += batch.size();
         }
         
-        if (batch.isEmpty() && pendingOperations.get() > 0) {
-            // No hay entradas nuevas pero hay operaciones pendientes
-            // Esto puede pasar si las entradas ya fueron escritas pero no flushed
+        // Force write to disk only once at the end of the cycle to avoid multiple fsync calls
+        if (totalFlushed > 0) {
+            channel.force(false);
+            pendingOperations.set(Math.max(0, pendingOperations.get() - totalFlushed));
+            logger.debug("Flushed {} entries to WAL (total pending: {})", totalFlushed, pendingOperations.get());
+        } else if (pendingOperations.get() > 0) {
+            // No new entries but there are pending operations
+            // This can happen if entries were already written but not flushed
             channel.force(false);
             pendingOperations.set(0);
-            return;
         }
-        
-        if (batch.isEmpty()) {
-            return;
-        }
-        
-        // Escribir todas las entradas del batch
-        for (WalEntry entry : batch) {
-            ByteBuffer buffer = serializeEntry(entry);
-            channel.position(position);
-            channel.write(buffer);
-            position += buffer.limit();
-        }
-        
-        // Forzar escritura al disco solo una vez por batch
-        channel.force(false);
-        pendingOperations.set(Math.max(0, pendingOperations.get() - batch.size()));
-        
-        logger.debug("Flushed {} entries to WAL (total pending: {})", batch.size(), pendingOperations.get());
     }
     
     /**
@@ -398,14 +398,15 @@ public class Wal implements AutoCloseable {
     }
     
     /**
-     * Cierra el WAL haciendo flush final de todas las operaciones pendientes
+     * Closes the WAL, performing a final flush of all pending operations.
+     * Cancels any scheduled tasks and ensures durability with a final fsync before closing the channel.
      */
     public synchronized void close() throws IOException {
         if (!closed) {
-            // Flush final de todas las operaciones pendientes
+            // Final flush of all pending operations
             doFlush();
             
-            // Shutdown del executor
+            // Shutdown the executor, canceling any pending scheduled tasks
             if (flushExecutor != null && !flushExecutor.isShutdown()) {
                 flushExecutor.shutdown();
                 try {
@@ -418,7 +419,7 @@ public class Wal implements AutoCloseable {
                 }
             }
             
-            channel.force(true); // Asegurar que todos los datos estén en disco
+            channel.force(true); // Ensure all data is on disk
             channel.close();
             closed = true;
             logger.info("WAL closed after flushing {} pending operations", pendingOperations.get());
