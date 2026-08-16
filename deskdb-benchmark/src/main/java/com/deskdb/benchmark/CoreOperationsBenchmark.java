@@ -14,15 +14,16 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Benchmark for core database operations including insert, update, select, and delete.
- * Measures throughput and performance characteristics of DeskDB operations.
+ * Measures throughput and latency percentiles of DeskDB operations.
  * 
  * Configuration optimized for statistical validity:
  * - 10 measurement iterations for reliable confidence intervals
  * - 5 warmup iterations to reach steady state
  * - 2 JVM forks to account for JVM-specific optimizations
+ * - Measures both throughput and sample time (latency percentiles p90/p99/p999)
  */
 @State(Scope.Thread)
-@BenchmarkMode(Mode.Throughput)
+@BenchmarkMode({Mode.Throughput, Mode.SampleTime})
 @OutputTimeUnit(TimeUnit.SECONDS)
 @Warmup(iterations = 5, time = 3)
 @Measurement(iterations = 10, time = 5)
@@ -31,8 +32,9 @@ public class CoreOperationsBenchmark {
 
     private DeskDB database;
     private TableOperations tableOps;
-    private int counter = 1000;
+    private int counter = 11000;
     private static final int BATCH_SIZE = 100;
+    private static final int PREPOPULATE_ROWS = 10000;
 
     @Setup
     public void setup() throws Exception {
@@ -53,10 +55,11 @@ public class CoreOperationsBenchmark {
 
     /**
      * Populates test data for benchmarks that require existing records.
+     * Inserts 10,000 rows to provide a realistic dataset for selectAllOperation.
      */
     private void populateTestData() throws Exception {
         try (Transaction tx = database.beginTransaction()) {
-            for (int i = 1; i <= 100; i++) {
+            for (int i = 1; i <= PREPOPULATE_ROWS; i++) {
                 tx.table("users")
                     .insert()
                     .value("id", i)
@@ -151,7 +154,7 @@ public class CoreOperationsBenchmark {
      */
     @Benchmark
     public void updateOperation(Blackhole bh) throws Exception {
-        int id = 1 + (Math.abs(counter++) % 100);
+        int id = 1 + (Math.abs(counter++) % PREPOPULATE_ROWS);
         String newName = "UpdatedUser_" + counter;
         int updated = tableOps.update().set("name", newName).where("id").eq(id).execute();
         bh.consume(updated);
