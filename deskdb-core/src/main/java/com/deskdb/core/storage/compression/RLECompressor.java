@@ -1,11 +1,13 @@
 package com.deskdb.core.storage.compression;
 
+import java.util.Arrays;
+
 /**
- * Compresor Run-Length Encoding (RLE) para datos columnares.
- * Ideal para columnas con muchos valores repetidos consecutivos.
+ * Run-Length Encoding (RLE) compressor for columnar data.
+ * Ideal for columns with many consecutive repeated values.
  * 
- * Formato: [count][value] repeated
- * Donde count es un byte (1-255) y value son los bytes del valor original.
+ * Format: [count][value] repeated
+ * Where count is a byte (1-255) and value are the bytes of the original value.
  */
 public class RLECompressor implements ColumnCompressor {
     
@@ -15,20 +17,20 @@ public class RLECompressor implements ColumnCompressor {
             return new byte[0];
         }
         
-        // Buffer temporal (puede crecer, se ajusta al final)
-        java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+        // Initialize with estimated capacity to reduce reallocations
+        java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream(data.length);
         
         int i = 0;
         while (i < data.length) {
             byte current = data[i];
             int count = 1;
             
-            // Contar repeticiones consecutivas (máximo 255)
+            // Count consecutive repetitions (max 255)
             while (i + count < data.length && data[i + count] == current && count < 255) {
                 count++;
             }
             
-            // Escribir count y valor
+            // Write count and value
             output.write(count);
             output.write(current);
             
@@ -44,8 +46,8 @@ public class RLECompressor implements ColumnCompressor {
             return new byte[0];
         }
         
-        java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
-        
+        // First pass: calculate total decompressed size
+        int totalSize = 0;
         int i = 0;
         while (i < compressedData.length) {
             // Validate that we have at least 2 bytes (count + value)
@@ -55,17 +57,32 @@ public class RLECompressor implements ColumnCompressor {
             }
             
             int count = compressedData[i] & 0xFF; // Convert to unsigned
+            totalSize += count;
+            i += 2;
+        }
+        
+        // Allocate exact size buffer
+        byte[] output = new byte[totalSize];
+        int pos = 0;
+        
+        // Second pass: fill the output buffer efficiently
+        i = 0;
+        while (i < compressedData.length) {
+            if (i + 1 >= compressedData.length) {
+                break;
+            }
+            
+            int count = compressedData[i] & 0xFF;
             byte value = compressedData[i + 1];
             
-            // Repeat the value 'count' times
-            for (int j = 0; j < count; j++) {
-                output.write(value);
-            }
+            // Fill the output buffer with the value repeated 'count' times
+            Arrays.fill(output, pos, pos + count, value);
+            pos += count;
             
             i += 2;
         }
         
-        return output.toByteArray();
+        return output;
     }
     
     @Override

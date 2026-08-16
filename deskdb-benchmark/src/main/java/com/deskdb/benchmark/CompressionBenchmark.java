@@ -17,7 +17,7 @@ import java.util.concurrent.TimeUnit;
  * - 2 JVM forks to account for JVM-specific optimizations
  */
 @State(Scope.Thread)
-@BenchmarkMode(Mode.Throughput)
+@BenchmarkMode({Mode.Throughput, Mode.SampleTime})
 @OutputTimeUnit(TimeUnit.SECONDS)
 @Warmup(iterations = 3, time = 5)
 @Measurement(iterations = 5, time = 10)
@@ -28,6 +28,9 @@ public class CompressionBenchmark {
     private byte[] repetitiveData;
     private byte[] randomData;
     private byte[] mixedData;
+    private byte[] compressedRepetitive;
+    private byte[] compressedRandom;
+    private byte[] compressedMixed;
 
     @Setup
     public void setup() {
@@ -52,6 +55,11 @@ public class CompressionBenchmark {
             mixedSb.append("AAAABBBB").append((char)('A' + (i % 26)));
         }
         mixedData = mixedSb.toString().getBytes(StandardCharsets.UTF_8);
+        
+        // Pre-compute compressed data for decompression benchmarks
+        compressedRepetitive = compressor.compress(repetitiveData);
+        compressedRandom = compressor.compress(randomData);
+        compressedMixed = compressor.compress(mixedData);
     }
 
     @Benchmark
@@ -62,8 +70,7 @@ public class CompressionBenchmark {
 
     @Benchmark
     public void decompressRepetitiveData(Blackhole bh) {
-        byte[] compressed = compressor.compress(repetitiveData);
-        byte[] decompressed = compressor.decompress(compressed);
+        byte[] decompressed = compressor.decompress(compressedRepetitive);
         bh.consume(decompressed);
     }
 
@@ -75,8 +82,7 @@ public class CompressionBenchmark {
 
     @Benchmark
     public void decompressRandomData(Blackhole bh) {
-        byte[] compressed = compressor.compress(randomData);
-        byte[] decompressed = compressor.decompress(compressed);
+        byte[] decompressed = compressor.decompress(compressedRandom);
         bh.consume(decompressed);
     }
 
@@ -88,8 +94,7 @@ public class CompressionBenchmark {
 
     @Benchmark
     public void decompressMixedData(Blackhole bh) {
-        byte[] compressed = compressor.compress(mixedData);
-        byte[] decompressed = compressor.decompress(compressed);
+        byte[] decompressed = compressor.decompress(compressedMixed);
         bh.consume(decompressed);
     }
 
