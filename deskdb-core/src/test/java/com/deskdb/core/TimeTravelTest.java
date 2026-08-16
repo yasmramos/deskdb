@@ -16,37 +16,20 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("Time Travel Feature Tests")
 class TimeTravelTest {
 
-    private static DeskDB db;
-    private static File dbDir;
-
-    @BeforeAll
-    static void setUp() throws Exception {
-        dbDir = new File(System.getProperty("java.io.tmpdir"), "deskdb_timetravel_" + System.currentTimeMillis());
-        dbDir.mkdirs();
-        db = DeskDB.open(dbDir.toPath());
-    }
-
-    @AfterAll
-    static void tearDown() throws Exception {
-        if (db != null) {
-            db.close();
-        }
-        if (dbDir != null && dbDir.exists()) {
-            deleteRecursively(dbDir);
-        }
-    }
+    private DeskDB db;
+    private File dbDir;
 
     @BeforeEach
-    void setupTest() throws Exception {
+    void setUp() throws Exception {
+        dbDir = new File(System.getProperty("java.io.tmpdir"), "deskdb_timetravel_" + System.currentTimeMillis() + "_" + Math.random());
+        dbDir.mkdirs();
+        db = DeskDB.open(dbDir.toPath());
+        
         // Create users table for testing using fluent API
-        try {
-            db.createTable("users",
-                new Column("id", DataType.INT).primaryKey(),
-                new Column("name", DataType.STRING),
-                new Column("age", DataType.INT));
-        } catch (Exception e) {
-            // Table might already exist, ignore
-        }
+        db.createTable("users",
+            new Column("id", DataType.INT).primaryKey(),
+            new Column("name", DataType.STRING),
+            new Column("age", DataType.INT));
         
         // Insert initial data using fluent API
         db.table("users")
@@ -67,14 +50,12 @@ class TimeTravelTest {
     }
 
     @AfterEach
-    void cleanupTest() throws Exception {
-        try {
-            db.table("users")
-                .delete()
-                .where("id").greaterThan(0)
-                .execute();
-        } catch (Exception e) {
-            // Ignore cleanup errors
+    void tearDown() throws Exception {
+        if (db != null) {
+            db.close();
+        }
+        if (dbDir != null && dbDir.exists()) {
+            deleteRecursively(dbDir);
         }
     }
 

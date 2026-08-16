@@ -87,11 +87,39 @@ public class HistoryBuilder {
             rows = table.select(null);
         }
 
-        // If targeting specific row ID, filter to that row
+        // If targeting specific row ID, filter to that row by primary key column
         if (targetRowId != null) {
-            rows = rows.stream()
-                .filter(r -> r.getRowId() == targetRowId)
-                .collect(Collectors.toList());
+            // Find the primary key column name from the schema
+            String pkColumnName = null;
+            for (Column col : table.getColumns()) {
+                if (col.isPrimaryKey()) {
+                    pkColumnName = col.getName();
+                    break;
+                }
+            }
+            
+            // If table has a primary key, filter by PK column value; otherwise fallback to internal rowId
+            if (pkColumnName != null) {
+                final String pkCol = pkColumnName;
+                rows = rows.stream()
+                    .filter(r -> {
+                        Object pkValue = r.getValues().get(pkCol);
+                        if (pkValue == null) {
+                            return false;
+                        }
+                        // Convert targetRowId to match the type of the PK column
+                        if (pkValue instanceof Number) {
+                            return ((Number) pkValue).longValue() == targetRowId;
+                        }
+                        return pkValue.equals(targetRowId);
+                    })
+                    .collect(Collectors.toList());
+            } else {
+                // Fallback: filter by internal rowId if no PK defined
+                rows = rows.stream()
+                    .filter(r -> r.getRowId() == targetRowId)
+                    .collect(Collectors.toList());
+            }
         }
 
         // Convert current rows to RowVersion objects
