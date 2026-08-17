@@ -15,11 +15,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.zip.CRC32;
 
 /**
@@ -55,15 +58,36 @@ public class Wal implements AutoCloseable {
         return walPath;
     }
     
-    // Buffer de escrituras pendientes
-    private final BlockingQueue<WalEntry> writeBuffer;
+    // Buffer de escrituras pendientes - ConcurrentLinkedQueue para writers no bloqueantes (MPSC lock-free)
+    private final ConcurrentLinkedQueue<WalEntry> writeBuffer;
     private final ScheduledExecutorService flushExecutor;
     private final AtomicBoolean flushScheduled;
     private volatile boolean needsForce = false;
     
     // Contador atómico de operaciones pendientes de commit
     private final AtomicInteger pendingOperations = new AtomicInteger(0);
-    private final Object commitLock = new Object();
+    
+    // Lock privado del flusher para serializar ciclos periódicos vs flushes forzados SAFE
+    // Este lock NUNCA es retenido por los writers, solo por el flusher y close()
+    private final ReentrantLock flushLock = new ReentrantLock();
+    
+    // Cola de commits SAFE pendientes de confirmación de durabilidad
+    // Cada entrada contiene un CompletableFuture que se completa cuando el fsync cubre esa posición
+    private final ConcurrentLinkedQueue<SafeCommitPromise> safeCommitPromises = new ConcurrentLinkedQueue<>();
+    
+    /**
+     * Promesa de durabilidad para commits SAFE.
+     * El flusher completa el future después de que channel.force() cubre esta entrada.
+     */
+    private static class SafeCommitPromise {
+        final long transactionId;
+        final CompletableFuture<Void> future;
+        
+        SafeCommitPromise(long transactionId, CompletableFuture<Void> future) {
+            this.transactionId = transactionId;
+            this.future = future;
+        }
+    }
     
     /**
      * Tipos de operaciones registradas en el WAL
@@ -138,8 +162,9 @@ public class Wal implements AutoCloseable {
             position = channel.size();
         }
         
-        // Initialize buffer and executor for async flush using ScheduledExecutorService for deterministic scheduling
-        this.writeBuffer = new ArrayBlockingQueue<>(DEFAULT_BUFFER_SIZE);
+        // Initialize non-blocking buffer and executor for async flush using ScheduledExecutorService for deterministic scheduling
+        // ConcurrentLinkedQueue allows lock-free O(1) appends from multiple writers without blocking
+        this.writeBuffer = new ConcurrentLinkedQueue<>();
         this.flushExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "WAL-Flush-Thread");
             t.setDaemon(true);
@@ -147,41 +172,25 @@ public class Wal implements AutoCloseable {
         });
         this.flushScheduled = new AtomicBoolean(false);
         
-        // Do not start periodic flush thread to avoid issues in tests
-        // Flush will be performed synchronously when needed
+        // Start periodic flush thread with deterministic scheduling (no Thread.sleep jitter)
+        startPeriodicFlush();
         
-        logger.info("WAL initialized at {} (sync mode)", walPath.toAbsolutePath());
+        logger.info("WAL initialized at {} (async flush enabled)", walPath.toAbsolutePath());
     }
     
     /**
-     * Inicia el thread de flush periódico en background
+     * Starts the periodic flush thread in background using ScheduledExecutorService.scheduleAtFixedRate
+     * for deterministic scheduling without Thread.sleep jitter.
+     * The flusher is the ONLY thread that writes to channel and calls channel.force().
      */
     private void startPeriodicFlush() {
-        flushExecutor.submit(() -> {
-            while (!closed && !Thread.currentThread().isInterrupted()) {
-                try {
-                    // Esperar un breve intervalo antes de verificar si hay datos
-                    Thread.sleep(FLUSH_INTERVAL_MS);
-                    
-                    // Si hay operaciones pendientes, hacer flush
-                    if (pendingOperations.get() > 0 || !writeBuffer.isEmpty()) {
-                        doFlush();
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
-                } catch (Exception e) {
-                    logger.error("Error in periodic flush: {}", e.getMessage());
-                }
+        flushExecutor.scheduleAtFixedRate(() -> {
+            if (!closed && pendingOperations.get() > 0) {
+                doFlushCycle(false);
             }
-            
-            // Flush final antes de terminar
-            try {
-                doFlush();
-            } catch (IOException e) {
-                logger.error("Error in final flush: {}", e.getMessage());
-            }
-        });
+        }, FLUSH_INTERVAL_MS, FLUSH_INTERVAL_MS, TimeUnit.MILLISECONDS);
+        
+        logger.debug("Periodic flush started with interval {}ms", FLUSH_INTERVAL_MS);
     }
     
     /**
@@ -192,7 +201,9 @@ public class Wal implements AutoCloseable {
     }
     
     /**
-     * Escribe una entrada en el WAL de forma asíncrona y bufferizada
+     * Writes an entry to the WAL in a non-blocking manner (O(1) append).
+     * Writers NEVER block or call doFlush/channel.force().
+     * Only enqueues the entry to the ConcurrentLinkedQueue for the flusher to process.
      */
     public void write(long transactionId, OperationType operation, 
                                    String tableName, String key, byte[] data) throws IOException {
@@ -201,139 +212,162 @@ public class Wal implements AutoCloseable {
         long timestamp = System.currentTimeMillis();
         WalEntry entry = new WalEntry(timestamp, transactionId, operation, tableName, key, data);
         
-        // Añadir al buffer y hacer flush asíncrono para alto rendimiento
-        if (!writeBuffer.offer(entry)) {
-            // Buffer lleno, hacer flush síncrono
-            synchronized (this) {
-                doFlush();
-                writeBuffer.offer(entry);
-                pendingOperations.incrementAndGet();
-            }
-        } else {
-            pendingOperations.incrementAndGet();
-            scheduleFlush();
-        }
+        // Lock-free O(1) append - writers never block
+        writeBuffer.offer(entry);
+        pendingOperations.incrementAndGet();
         
-        logger.trace("WAL entry written: tx={}, op={}, table={}, key={}", 
+        logger.trace("WAL entry enqueued: tx={}, op={}, table={}, key={}", 
                     transactionId, operation, tableName, key);
     }
     
     /**
-     * Schedules an async flush if none is pending.
-     * Uses ScheduledExecutorService.schedule() with FLUSH_INTERVAL_MS delay for deterministic group commit batching.
-     * This eliminates the non-deterministic Thread.sleep(1) jitter that caused benchmark variance.
+     * Flush cycle executed by the flusher thread only.
+     * Drains all entries from the buffer, writes them to channel, and performs a single fsync.
+     * For SAFE commits, completes the associated CompletableFuture after fsync.
+     * 
+     * @param forceSyncIfSafe if true and there are SAFE commit promises, forces immediate fsync
      */
-    private void scheduleFlush() {
-        if (flushScheduled.compareAndSet(false, true)) {
-            flushExecutor.schedule(() -> {
-                try {
-                    doFlush();
-                } catch (IOException e) {
-                    logger.error("Error in scheduled flush: {}", e.getMessage());
-                } finally {
-                    flushScheduled.set(false);
-                }
-            }, FLUSH_INTERVAL_MS, TimeUnit.MILLISECONDS);
-        }
-    }
-    
-    /**
-     * Performs flush of all buffered entries to disk with optimized batching.
-     * Drains the buffer completely in a loop to ensure all pending entries are processed in one flush cycle,
-     * reducing variance by avoiding partial flushes that leave entries waiting for the next cycle.
-     */
-    private synchronized void doFlush() throws IOException {
-        if (writeBuffer.isEmpty() && pendingOperations.get() == 0) {
-            return;
-        }
+    private void doFlushCycle(boolean forceSyncIfSafe) {
+        // Only the flusher thread executes this - no synchronization needed with writers
+        // Writers use ConcurrentLinkedQueue which is lock-free
         
-        // Drain and process all entries in the buffer in a loop to ensure complete drainage per flush cycle
-        int totalFlushed = 0;
-        List<WalEntry> batch = new ArrayList<>();
-        
-        while (!writeBuffer.isEmpty()) {
-            batch.clear();
-            writeBuffer.drainTo(batch, BATCH_COMMIT_THRESHOLD);
-            
-            if (batch.isEmpty()) {
-                break;
+        // Acquire flushLock to serialize with other flush cycles (e.g., forced flushes for SAFE)
+        // This lock is NEVER held by writers, only by flusher and close()/flush()
+        flushLock.lock();
+        try {
+            if (writeBuffer.isEmpty() && pendingOperations.get() == 0) {
+                return;
             }
             
-            // Write all entries in the batch
-            for (WalEntry entry : batch) {
-                ByteBuffer buffer = serializeEntry(entry);
+            // Drain all entries from the buffer (ConcurrentLinkedQueue.drainTo is not available, so we iterate)
+            List<WalEntry> batch = new ArrayList<>();
+            WalEntry entry;
+            while ((entry = writeBuffer.poll()) != null) {
+                batch.add(entry);
+            }
+            
+            if (batch.isEmpty()) {
+                return;
+            }
+            
+            // Write all entries to channel
+            for (WalEntry e : batch) {
+                ByteBuffer buffer = serializeEntry(e);
                 channel.position(position);
                 channel.write(buffer);
                 position += buffer.limit();
             }
             
-            totalFlushed += batch.size();
-        }
-        
-        // Force write to disk only once at the end of the cycle to avoid multiple fsync calls
-        if (totalFlushed > 0) {
+            // Single fsync for the entire batch
             channel.force(false);
-            pendingOperations.set(Math.max(0, pendingOperations.get() - totalFlushed));
-            logger.debug("Flushed {} entries to WAL (total pending: {})", totalFlushed, pendingOperations.get());
-        } else if (pendingOperations.get() > 0) {
-            // No new entries but there are pending operations
-            // This can happen if entries were already written but not flushed
-            channel.force(false);
-            pendingOperations.set(0);
+            pendingOperations.set(Math.max(0, pendingOperations.get() - batch.size()));
+            
+            // Complete all SAFE commit promises that were included in this flush
+            // All commits enqueued before this fsync are now durable
+            SafeCommitPromise promise;
+            while ((promise = safeCommitPromises.poll()) != null) {
+                promise.future.complete(null);
+            }
+            
+            logger.debug("Flushed {} entries to WAL (total pending: {})", batch.size(), pendingOperations.get());
+            
+        } catch (IOException e) {
+            logger.error("Error in flush cycle: {}", e.getMessage());
+            // Fail any pending SAFE promises
+            SafeCommitPromise promise;
+            while ((promise = safeCommitPromises.poll()) != null) {
+                promise.future.completeExceptionally(e);
+            }
+        } finally {
+            flushLock.unlock();
         }
     }
     
     /**
-     * Escribe una operación de commit con opción de flush inmediato según nivel de durabilidad.
-     * @param transactionId el ID de la transacción
-     * @param forceSync si true, fuerza fsync inmediato (modo SAFE); si false, bufferiza para group commit (modo NORMAL/ASYNC)
-     * @throws IOException si ocurre un error de E/S
+     * Writes a COMMIT entry with optional durability guarantee via CompletableFuture.
+     * For SAFE mode: registers a promise and waits for fsync confirmation.
+     * For NORMAL/ASYNC mode: just enqueues the COMMIT entry and returns immediately.
+     * 
+     * @param transactionId the transaction ID
+     * @param forceSync if true (SAFE), wait for fsync confirmation; if false (NORMAL/ASYNC), return immediately
+     * @throws IOException if an I/O error occurs during enqueue (not during fsync wait)
      */
-    public synchronized void writeCommit(long transactionId, boolean forceSync) throws IOException {
-        // Escribir COMMIT como entrada normal (se bufferiza)
-        write(transactionId, OperationType.COMMIT, "", "", new byte[0]);
+    public void writeCommit(long transactionId, boolean forceSync) throws IOException {
+        checkClosed();
         
-        // Forzar flush inmediato solo si se requiere durabilidad estricta (SAFE mode)
+        // Enqueue COMMIT entry (non-blocking O(1))
+        long timestamp = System.currentTimeMillis();
+        WalEntry commitEntry = new WalEntry(timestamp, transactionId, OperationType.COMMIT, "", "", new byte[0]);
+        writeBuffer.offer(commitEntry);
+        pendingOperations.incrementAndGet();
+        
         if (forceSync) {
-            doFlush();
-            logger.info("Transaction {} committed to WAL (fsync immediate)", transactionId);
+            // SAFE mode: register a promise and wait for fsync confirmation
+            CompletableFuture<Void> promise = new CompletableFuture<>();
+            safeCommitPromises.offer(new SafeCommitPromise(transactionId, promise));
+            
+            // Signal flusher to run immediately (by scheduling with 0 delay)
+            flushExecutor.execute(() -> doFlushCycle(true));
+            
+            // Wait for fsync confirmation (blocks ONLY this commit thread, not other writers)
+            try {
+                promise.get(30, TimeUnit.SECONDS); // Timeout to avoid infinite hang
+                logger.info("Transaction {} committed to WAL (fsync confirmed)", transactionId);
+            } catch (Exception e) {
+                logger.error("Transaction {} commit failed waiting for fsync: {}", transactionId, e.getMessage());
+                throw new IOException("SAFE commit failed", e);
+            }
         } else {
+            // NORMAL/ASYNC mode: durability is eventual via periodic flush
             logger.debug("Transaction {} committed to WAL (buffered for group commit)", transactionId);
         }
     }
     
     /**
-     * Escribe una operación de commit con flush inmediato para garantizar durabilidad (compatibilidad).
-     * Delega en writeCommit(transactionId, true) para preservar comportamiento anterior.
-     * @param transactionId el ID de la transacción
-     * @throws IOException si ocurre un error de E/S
+     * Writes a COMMIT entry with immediate fsync for backward compatibility.
+     * Delegates to writeCommit(transactionId, true) to preserve previous behavior.
+     * @param transactionId the transaction ID
+     * @throws IOException if an I/O error occurs
      */
-    public synchronized void writeCommit(long transactionId) throws IOException {
+    public void writeCommit(long transactionId) throws IOException {
         writeCommit(transactionId, true);
     }
     
     /**
-     * Escribe una operación de rollback
+     * Writes a ROLLBACK entry (non-blocking O(1) append).
+     * @param transactionId the transaction ID
+     * @throws IOException if an I/O error occurs during enqueue
      */
-    public synchronized void writeRollback(long transactionId) throws IOException {
-        write(transactionId, OperationType.ROLLBACK, "", "", new byte[0]);
+    public void writeRollback(long transactionId) throws IOException {
+        checkClosed();
+        long timestamp = System.currentTimeMillis();
+        WalEntry entry = new WalEntry(timestamp, transactionId, OperationType.ROLLBACK, "", "", new byte[0]);
+        writeBuffer.offer(entry);
+        pendingOperations.incrementAndGet();
     }
     
     /**
-     * Escribe un checkpoint (punto de recuperación)
+     * Writes a CHECKPOINT entry (non-blocking O(1) append).
+     * @param transactionId the transaction ID
+     * @throws IOException if an I/O error occurs during enqueue
      */
-    public synchronized void writeCheckpoint(long transactionId) throws IOException {
-        write(transactionId, OperationType.CHECKPOINT, "", "", new byte[0]);
+    public void writeCheckpoint(long transactionId) throws IOException {
+        checkClosed();
+        long timestamp = System.currentTimeMillis();
+        WalEntry entry = new WalEntry(timestamp, transactionId, OperationType.CHECKPOINT, "", "", new byte[0]);
+        writeBuffer.offer(entry);
+        pendingOperations.incrementAndGet();
     }
     
     /**
-     * Lee todas las entradas del WAL desde el principio
+     * Reads all entries from the WAL from the beginning.
+     * Note: This is used for recovery and should only be called when there are no active writers.
      */
-    public synchronized List<WalEntry> readAll() throws IOException {
+    public List<WalEntry> readAll() throws IOException {
         checkClosed();
         
         List<WalEntry> entries = new ArrayList<>();
-        channel.position(HEADER_SIZE); // Saltar header
+        channel.position(HEADER_SIZE); // Skip header
         
         while (channel.position() < channel.size()) {
             try {
@@ -349,8 +383,8 @@ public class Wal implements AutoCloseable {
                 buffer.flip();
                 int entryLength = buffer.getInt();
                 
-                if (entryLength <= 0 || entryLength > 10 * 1024 * 1024) { // Máximo 10MB por entrada
-                    logger.warn("Entrada WAL con longitud inválida: {}", entryLength);
+                if (entryLength <= 0 || entryLength > 10 * 1024 * 1024) { // Max 10MB per entry
+                    logger.warn("Invalid WAL entry length: {}", entryLength);
                     break;
                 }
                 
@@ -371,11 +405,11 @@ public class Wal implements AutoCloseable {
                     entries.add(entry);
                 } else {
                     logger.warn("Skipping corrupted WAL entry at position {}", channel.position());
-                    break; // Detener reproducción ante corrupción
+                    break; // Stop replay on corruption
                 }
                 
             } catch (Exception e) {
-                logger.warn("Error al leer entrada WAL, posible corrupción: {}", e.getMessage());
+                logger.warn("Error reading WAL entry, possible corruption: {}", e.getMessage());
                 break;
             }
         }
@@ -385,32 +419,39 @@ public class Wal implements AutoCloseable {
     }
     
     /**
-     * Trunca el WAL (después de un checkpoint exitoso)
+     * Truncates the WAL (after a successful checkpoint).
+     * Waits for the buffer to drain completely before truncating.
      */
-    public synchronized void truncate() throws IOException {
+    public void truncate() throws IOException {
         checkClosed();
-        // Esperar a que el buffer esté vacío antes de truncar
-        doFlush();
-        channel.truncate(0);
-        position = 0;
-        writeHeader();
-        logger.info("WAL truncated");
+        // Wait for buffer to be empty by forcing a flush cycle and waiting
+        flushLock.lock();
+        try {
+            // Drain all entries and fsync before truncating
+            doFlushCycle(false);
+            channel.truncate(0);
+            position = 0;
+            writeHeader();
+            logger.info("WAL truncated");
+        } finally {
+            flushLock.unlock();
+        }
     }
     
     /**
      * Closes the WAL, performing a final flush of all pending operations.
      * Cancels any scheduled tasks and ensures durability with a final fsync before closing the channel.
+     * Completes or fails any pending SAFE commit promises.
      */
-    public synchronized void close() throws IOException {
+    public void close() throws IOException {
         if (!closed) {
-            // Final flush of all pending operations
-            doFlush();
+            closed = true; // Stop accepting new writes
             
-            // Shutdown the executor, canceling any pending scheduled tasks
+            // Shutdown the executor, canceling periodic flushes
             if (flushExecutor != null && !flushExecutor.isShutdown()) {
                 flushExecutor.shutdown();
                 try {
-                    if (!flushExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    if (!flushExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
                         flushExecutor.shutdownNow();
                     }
                 } catch (InterruptedException e) {
@@ -419,28 +460,51 @@ public class Wal implements AutoCloseable {
                 }
             }
             
-            channel.force(true); // Ensure all data is on disk
-            channel.close();
-            closed = true;
-            logger.info("WAL closed after flushing {} pending operations", pendingOperations.get());
+            // Final flush: acquire flushLock and drain everything
+            flushLock.lock();
+            try {
+                doFlushCycle(false);
+                
+                // Complete any remaining SAFE promises (they won't get fsync'd individually but are in the final force)
+                SafeCommitPromise promise;
+                while ((promise = safeCommitPromises.poll()) != null) {
+                    promise.future.complete(null);
+                }
+                
+                channel.force(true); // Ensure all data is on disk
+                channel.close();
+                logger.info("WAL closed after flushing {} pending operations", pendingOperations.get());
+            } finally {
+                flushLock.unlock();
+            }
         }
     }
     
-    public synchronized void flush() throws IOException {
-        doFlush();
+    /**
+     * Forces an immediate flush of all buffered entries.
+     * Used for explicit synchronization points.
+     */
+    public void flush() throws IOException {
+        flushLock.lock();
+        try {
+            doFlushCycle(false);
+        } finally {
+            flushLock.unlock();
+        }
     }
     
     /**
-     * Verifica si el WAL está cerrado
+     * Checks if the WAL is closed
      */
     public boolean isClosed() {
         return closed;
     }
     
     /**
-     * Obtiene el número de entradas en el WAL
+     * Gets the number of entries in the WAL (reads all entries - expensive operation).
+     * Note: This is mainly for debugging/testing and should not be used in production code paths.
      */
-    public synchronized int size() throws IOException {
+    public int size() throws IOException {
         return readAll().size();
     }
     
