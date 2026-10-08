@@ -27,6 +27,27 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  */
 public class DeskDB implements AutoCloseable {
     private static final Logger logger = LoggerFactory.getLogger(DeskDB.class);
+
+    // ==================== FORMATO EN DISCO (.deskdb v1) ====================
+    // Cabecera de formato: magic (4 bytes ASCII "DESK") + version (2 bytes).
+    // Sin cabecera se asume formato legacy v0 (solo lectura de compatibilidad).
+    static final int MAGIC = 0x4445534B; // "DESK"
+    static final short FORMAT_VERSION = 1;
+
+    // Códigos de tipo EXPLÍCITOS y estables por contrato. NO usar ordinal() del enum:
+    // reordenar o insertar constantes en DataType rompería todas las BD existentes.
+    // Estos valores son parte del formato .deskdb v1 y nunca deben cambiar de número.
+    static final byte T_NULL = -1;
+    static final byte T_STRING = 1;
+    static final byte T_INT = 2;
+    static final byte T_LONG = 3;
+    static final byte T_DOUBLE = 4;
+    static final byte T_DECIMAL = 5;
+    static final byte T_BOOLEAN = 6;
+    static final byte T_DATE = 7;
+    static final byte T_TIMESTAMP = 8;   // millis (long) + nanos (int)
+    static final byte T_BLOB = 9;
+    static final byte T_JSON = 10;
     
     // ThreadLocal para rastrear transacciones activas y evitar anidamiento
     private static final ThreadLocal<Transaction> currentTransaction = new ThreadLocal<>();
@@ -263,8 +284,10 @@ public class DeskDB implements AutoCloseable {
      */
     public void close() throws IOException {
         if (!closed) {
-            // Only save to file if not in-memory-only mode and dbPath is a regular file
-            if (!inMemoryOnly && java.nio.file.Files.isRegularFile(dbPath)) {
+            // Guardar SIEMPRE que haya algo persistente (esquema o datos), aunque el
+            // archivo aún no exista: una BD nueva con tablas creadas y cero filas
+            // debe persistir su esquema al cerrar.
+            if (!inMemoryOnly && hasContentToSave()) {
                 saveToFile();
             }
             
@@ -285,10 +308,20 @@ public class DeskDB implements AutoCloseable {
     
     /**
      * Obtiene el WAL de la base de datos.
-     * @return El WAL instance
+     * <p><strong>Nota:</strong> en modo in-memory no existe WAL y este método
+     * devuelve {@code null}. Los llamadores deben comprobar null antes de usarlo,
+     * o consultar {@link #hasWal()}.</p>
+     * @return El WAL instance, o null en modo in-memory
      */
     public Wal getWal() {
         return wal;
+    }
+
+    /**
+     * Indica si esta instancia tiene WAL disponible (false en modo in-memory).
+     */
+    public boolean hasWal() {
+        return wal != null;
     }
 
     /**
@@ -312,17 +345,11 @@ public class DeskDB implements AutoCloseable {
     public Transaction beginTransaction(boolean autoCommit) throws IOException {
         checkClosed();
         
-        // For explicit transactions (autoCommit=false), don't reuse existing transactions
-        // This allows multiple explicit transactions to run concurrently for isolation testing
-        if (autoCommit) {
-            // If there's already an active implicit transaction in this thread, return it to avoid nesting
-            Transaction existingTx = currentTransaction.get();
-            if (existingTx != null) {
-                logger.debug("Reusing existing transaction in thread {}", Thread.currentThread().getName());
-                return existingTx;
-            }
-        }
-        
+        // Nota de semántica: aquí autoCommit=true significa "transacción implícita
+        // de un solo uso" (auto-commitea al cerrar). El ThreadLocal currentTransaction
+        // SOLO almacena transacciones explícitas (autoCommit=false), por lo que la
+        // antigua comprobación de reutilización en la rama autoCommit era código
+        // muerto (siempre devolvía null) y se ha eliminado.
         Transaction tx = new Transaction(this, !autoCommit, writeConcern);
         if (!autoCommit) {
             currentTransaction.set(tx);
@@ -522,11 +549,16 @@ public class DeskDB implements AutoCloseable {
     @SuppressWarnings("unchecked")
     public <K extends Comparable<K>> void createIndex(String tableName, String indexName, String columnName, boolean unique) throws IOException {
         checkClosed();
+        // La tabla DEBE existir: antes se creaba un mapa local que nunca se
+        // registraba en el catálogo y el índice se perdía en silencio.
+        if (!catalogManager.hasTable(tableName)) {
+            throw new IllegalStateException("No se puede crear el índice: la tabla '" + tableName + "' no existe");
+        }
         Map<String, BTree<?, ?>> tableIndexes = getIndexMap(tableName);
         if (tableIndexes == null) {
+            // Registrar el mapa en el catálogo para que el índice sea visible y persistente
             tableIndexes = new java.util.concurrent.ConcurrentHashMap<>();
-            // Note: We can't easily update the catalog here without more refactoring
-            // For now, this is a limitation of the partial refactor
+            catalogManager.registerIndex(tableName, tableIndexes);
         }
         BTree<K, Long> btree = new BTree<>(indexName);
         tableIndexes.put(indexName, btree);
@@ -551,9 +583,13 @@ public class DeskDB implements AutoCloseable {
      */
     void createIndexInternal(String tableName, String indexName, String columnList, boolean unique) throws IOException {
         checkClosed();
+        if (!catalogManager.hasTable(tableName)) {
+            throw new IllegalStateException("No se puede crear el índice: la tabla '" + tableName + "' no existe");
+        }
         Map<String, BTree<?, ?>> tableIndexes = getIndexMap(tableName);
         if (tableIndexes == null) {
             tableIndexes = new java.util.concurrent.ConcurrentHashMap<>();
+            catalogManager.registerIndex(tableName, tableIndexes);
         }
         
         // Use raw type to avoid generic bounds issues with composite keys
@@ -613,7 +649,26 @@ public class DeskDB implements AutoCloseable {
             byte[] content = Files.readAllBytes(dbPath);
             if (content.length > 0) {
                 ByteArrayInputStream bais = new ByteArrayInputStream(content);
+                bais.mark(content.length); // mark(0) para rebobinar si no hay cabecera v1
                 DataInputStream in = new DataInputStream(bais);
+                
+                // Detectar formato por CABECERA (magic + version), no por heurísticas.
+                boolean legacy;
+                int firstInt = in.readInt();
+                if (firstInt == MAGIC) {
+                    short version = in.readShort();
+                    if (version != FORMAT_VERSION) {
+                        throw new IOException("Versión de formato .deskdb no soportada: " + version +
+                                " (esta build soporta v" + FORMAT_VERSION + ")");
+                    }
+                    legacy = false;
+                } else {
+                    // Sin cabecera: archivo legacy v0 (schemaCount era el primer int).
+                    logger.warn("Archivo .deskdb sin cabecera de versión (formato legacy v0). " +
+                            "Será migrado a v1 en el próximo guardado.");
+                    bais.reset();
+                    legacy = true;
+                }
                 
                 // Read number of schemas
                 int schemaCount = in.readInt();
@@ -626,38 +681,14 @@ public class DeskDB implements AutoCloseable {
                         DataType dataType = DataType.valueOf(in.readUTF());
                         boolean primaryKey = in.readBoolean();
                         boolean notNull = in.readBoolean();
-                        // Read remaining metadata for full atomic deserialization
-                        boolean unique = in.available() > 0 && in.readBoolean();
+                        // Formato v1: campos fijos y siempre presentes (sin available()).
+                        boolean unique = in.readBoolean();
                         Object defaultValue = null;
-                        boolean hasDefault = in.available() > 0 && in.readBoolean();
+                        boolean hasDefault = in.readBoolean();
                         if (hasDefault) {
-                            // Read default value using BinarySerializer logic
-                            // For backward compatibility, we skip complex default values
-                            // Only primitive types and String are supported as defaults
-                            byte typeCode = in.readByte();
-                            if (typeCode >= 0) { // Not NULL
-                                switch (typeCode) {
-                                    case 0: // STRING
-                                        defaultValue = in.readUTF();
-                                        break;
-                                    case 1: // INTEGER
-                                        defaultValue = in.readInt();
-                                        break;
-                                    case 2: // LONG
-                                        defaultValue = in.readLong();
-                                        break;
-                                    case 3: // DOUBLE
-                                        defaultValue = in.readDouble();
-                                        break;
-                                    case 4: // BOOLEAN
-                                        defaultValue = in.readBoolean();
-                                        break;
-                                    default:
-                                        // Skip unsupported default value types for backward compatibility
-                                        logger.warn("Skipping unsupported default value type: {}", typeCode);
-                                        break;
-                                }
-                            }
+                            // Defaults solo soportan tipos primitivos y String.
+                            // En legacy v0 los códigos venían del esquema antiguo de defaults.
+                            defaultValue = readValue(in, legacy);
                         }
                         // Use atomic deserialization method to ensure immutability
                         columns[j] = Column.deserialize(colName, dataType, primaryKey, notNull, unique, defaultValue);
@@ -673,7 +704,7 @@ public class DeskDB implements AutoCloseable {
                 }
                 
                 // Read data from each table directly (matches write format)
-                while (in.available() >= 4) { // At least need 4 bytes for table name length
+                while (in.available() >= 2) { // readUTF necesita al menos 2 bytes (longitud)
                     String tableName = in.readUTF();
                     int rowCount = in.readInt();
                     logger.debug("Loading {} rows from table {}", rowCount, tableName);
@@ -687,7 +718,7 @@ public class DeskDB implements AutoCloseable {
                             
                             for (int j = 0; j < valueCount; j++) {
                                 String key = in.readUTF();
-                                Object value = readValue(in);
+                                Object value = readValue(in, legacy);
                                 values.put(key, value);
                                 logger.trace("  {} = {} [type={}]", key, value, value != null ? value.getClass().getSimpleName() : "null");
                             }
@@ -707,54 +738,99 @@ public class DeskDB implements AutoCloseable {
                 logger.info("Schemas and data loaded from {}", dbPath);
             }
         } catch (Exception e) {
-            logger.warn("Error loading existing data, starting with empty DB: {}", e.getMessage(), e);
+            // NO degradar silenciosamente a BD vacía: eso provocaría que el próximo
+            // saveToFile() sobrescriba datos reales. Propagar: el constructor cierra
+            // el WAL y lanza, impidiendo abrir una BD corrupta/ilegible.
+            throw new IOException("Failed to load database file '" + dbPath.toAbsolutePath() +
+                    "'. Refusing to open to avoid overwriting potentially valid data.", e);
         } finally {
             dbLock.writeLock().unlock();
         }
     }
     
     private Object readValue(DataInputStream in) throws IOException {
-        // Read type code (matches writeValue format)
+        return readValue(in, false);
+    }
+
+    /**
+     * Lee un valor serializado. En formato v1 los códigos son los explícitos (T_*).
+     * En archivos legacy v0 se usaban ordinales de DataType y el esquema antiguo de
+     * defaults; con legacy=true se reinterpretan a los códigos canónicos.
+     */
+    private Object readValue(DataInputStream in, boolean legacy) throws IOException {
         byte typeCode = in.readByte();
-        
-        // Handle NULL marker (-1)
-        if (typeCode == -1) {
-            return null;
+        if (legacy && typeCode >= 0) {
+            typeCode = legacyOrdinalToCode(typeCode);
         }
         
-        // Handle DataType enum ordinals
-        DataType dataType = DataType.values()[typeCode];
-        switch (dataType) {
-            case STRING:
-            case JSON:
+        switch (typeCode) {
+            case T_NULL:
+                return null;
+            case T_STRING:
                 return in.readUTF();
-            case INT:
+            case T_INT:
                 return in.readInt();
-            case LONG:
+            case T_LONG:
                 return in.readLong();
-            case DOUBLE:
+            case T_DOUBLE:
                 return in.readDouble();
-            case BOOLEAN:
+            case T_BOOLEAN:
                 return in.readBoolean();
-            case DECIMAL:
-                String bdStr = in.readUTF();
-                return new java.math.BigDecimal(bdStr);
-            case DATE:
+            case T_DECIMAL:
+                return new java.math.BigDecimal(in.readUTF());
+            case T_DATE:
                 return new java.util.Date(in.readLong());
-            case TIMESTAMP:
+            case T_TIMESTAMP: {
                 long tsMillis = in.readLong();
                 int nanos = in.readInt();
                 java.sql.Timestamp ts = new java.sql.Timestamp(tsMillis);
                 ts.setNanos(nanos);
                 return ts;
-            case BLOB:
+            }
+            case T_BLOB: {
                 int blobLen = in.readInt();
+                if (blobLen < 0) {
+                    throw new IOException("Tamaño de BLOB negativo/corrupto: " + blobLen);
+                }
                 byte[] blobData = new byte[blobLen];
                 in.readFully(blobData);
                 return blobData;
+            }
+            case T_JSON:
+                return in.readUTF();
             default:
-                throw new IOException("Unknown or unsupported data type during load: " + dataType);
+                // Error claro: nunca devolver null silencioso ante dato corrupto
+                throw new IOException("Código de tipo desconocido o corrupto en archivo .deskdb: " + typeCode);
         }
+    }
+
+    /**
+     * Mapea los códigos legacy v0 (ordinales de DataType y esquema de defaults antiguo)
+     * a los códigos explícitos canónicos. Solo para lectura de compatibilidad.
+     */
+    private static byte legacyOrdinalToCode(byte legacyCode) {
+        switch (legacyCode) {
+            case 0: return T_STRING;   // ordinal STRING / default STRING
+            case 1: return T_INT;      // ordinal INT / default INTEGER
+            case 2: return T_LONG;     // ordinal LONG / default LONG
+            case 3: return T_DOUBLE;   // ordinal DOUBLE / default DOUBLE
+            case 4: return T_BOOLEAN;  // ordinal DECIMAL / default BOOLEAN
+            case 5: return T_BOOLEAN;  // ordinal BOOLEAN
+            case 6: return T_DATE;     // ordinal DATE
+            case 7: return T_TIMESTAMP;// ordinal TIMESTAMP
+            case 8: return T_BLOB;     // ordinal BLOB
+            case 9: return T_JSON;     // ordinal JSON
+            default: return legacyCode;
+        }
+    }
+
+    /**
+     * Indica si hay contenido persistente (esquemas o tablas) que deba guardarse.
+     * Sustituye al antiguo chequeo "¿existe el archivo?", que impedía persistir
+     * BD nuevas con esquema pero sin filas.
+     */
+    private boolean hasContentToSave() {
+        return !catalogManager.getAllSchemas().isEmpty() || !catalogManager.getAllTables().isEmpty();
     }
 
     /**
@@ -778,6 +854,12 @@ public class DeskDB implements AutoCloseable {
             
             try (DataOutputStream out = new DataOutputStream(
                     Files.newOutputStream(tempPath))) {
+                
+                // Cabecera de formato: magic + versión. Establece un contrato explícito
+                // para el archivo .deskdb y permite detectar corrupción/incompatibilidad
+                // al abrir, en lugar de heurísticas sobre bytes restantes.
+                out.writeInt(MAGIC);
+                out.writeShort(FORMAT_VERSION);
                 
                 // Save number of schemas
                 out.writeInt(catalogManager.getAllSchemas().size());
@@ -815,11 +897,18 @@ public class DeskDB implements AutoCloseable {
                     out.writeUTF(table.getName());
                     out.writeInt(tableData.size());
                     
-                    // Write each row directly from internal map
-                    for (Map.Entry<Long, Row> rowEntry : tableData.entrySet()) {
+                    // Write each row directly from internal map, ordenado por rowId
+                    // para garantizar salida determinista (reproducibilidad y diffs byte a byte)
+                    java.util.List<Map.Entry<Long, Row>> orderedRows =
+                        new java.util.ArrayList<>(tableData.entrySet());
+                    orderedRows.sort(java.util.Comparator.comparingLong(Map.Entry::getKey));
+                    for (Map.Entry<Long, Row> rowEntry : orderedRows) {
                         Row row = rowEntry.getValue();
                         out.writeLong(row.getRowId());
-                        Map<String, Object> values = row.getValues();
+                        // Orden determinista TAMBIÉN por nombre de columna: un LinkedHashMap
+                        // reconstruido al recargar no garantiza el mismo orden de inserción,
+                        // lo que rompería la reproducibilidad byte a byte del formato v1.
+                        Map<String, Object> values = new java.util.TreeMap<>(row.getValues());
                         out.writeInt(values.size());
                         for (Map.Entry<String, Object> valEntry : values.entrySet()) {
                             out.writeUTF(valEntry.getKey());
@@ -852,45 +941,48 @@ public class DeskDB implements AutoCloseable {
     
     private void writeValue(DataOutputStream out, Object value) throws IOException {
         if (value == null) {
-            // Write NULL marker (-1)
-            out.writeByte(-1);
+            // Write NULL marker
+            out.writeByte(T_NULL);
             return;
         }
         
-        // Write DataType enum ordinal followed by value
+        // Códigos de tipo EXPLÍCITOS (estables por contrato, no ordinal()).
+        // IMPORTANTE: java.sql.Timestamp extiende java.util.Date, por lo que
+        // Timestamp DEBE comprobarse ANTES que Date; si no, se serializa como
+        // DATE y se pierden los nanosegundos.
         if (value instanceof Boolean) {
-            out.writeByte(DataType.BOOLEAN.ordinal());
+            out.writeByte(T_BOOLEAN);
             out.writeBoolean((Boolean) value);
         } else if (value instanceof Integer) {
-            out.writeByte(DataType.INT.ordinal());
+            out.writeByte(T_INT);
             out.writeInt((Integer) value);
         } else if (value instanceof Long) {
-            out.writeByte(DataType.LONG.ordinal());
+            out.writeByte(T_LONG);
             out.writeLong((Long) value);
         } else if (value instanceof Double) {
-            out.writeByte(DataType.DOUBLE.ordinal());
+            out.writeByte(T_DOUBLE);
             out.writeDouble((Double) value);
         } else if (value instanceof String) {
-            out.writeByte(DataType.STRING.ordinal());
+            out.writeByte(T_STRING);
             out.writeUTF((String) value);
         } else if (value instanceof java.math.BigDecimal) {
-            out.writeByte(DataType.DECIMAL.ordinal());
+            out.writeByte(T_DECIMAL);
             out.writeUTF(((java.math.BigDecimal) value).toPlainString());
-        } else if (value instanceof java.util.Date) {
-            out.writeByte(DataType.DATE.ordinal());
-            out.writeLong(((java.util.Date) value).getTime());
         } else if (value instanceof java.sql.Timestamp) {
-            out.writeByte(DataType.TIMESTAMP.ordinal());
+            out.writeByte(T_TIMESTAMP);
             out.writeLong(((java.sql.Timestamp) value).getTime());
             out.writeInt(((java.sql.Timestamp) value).getNanos());
+        } else if (value instanceof java.util.Date) {
+            out.writeByte(T_DATE);
+            out.writeLong(((java.util.Date) value).getTime());
         } else if (value instanceof byte[]) {
-            out.writeByte(DataType.BLOB.ordinal());
+            out.writeByte(T_BLOB);
             byte[] blobData = (byte[]) value;
             out.writeInt(blobData.length);
             out.write(blobData);
         } else {
             // Fallback: serialize as JSON string
-            out.writeByte(DataType.JSON.ordinal());
+            out.writeByte(T_JSON);
             out.writeUTF(value.toString());
         }
     }
