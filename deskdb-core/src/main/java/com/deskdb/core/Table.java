@@ -26,7 +26,15 @@ import java.util.stream.Collectors;
 public class Table {
     private final String name;
     private final List<Column> columns;
-    final Map<Long, Row> data = new HashMap<>();
+    // IMPORTANT: use a TreeMap (ordered by rowId), NOT a HashMap. With a HashMap,
+    // the iteration order of data.values() depends on Long.hashCode and on the
+    // map's capacity-rehash history, so operations like `new ArrayList<>(data.values())`
+    // or the scans performed by select() can return rows in different orders across
+    // JVM instances with identical content. This caused intermittent test failures
+    // that depended on test execution order (TimeTravelTest passed in isolation but
+    // failed within the full suite). A TreeMap guarantees deterministic ordering
+    // independent of the previous insertion pattern.
+    final Map<Long, Row> data = new java.util.TreeMap<>();
     private final Map<String, BTree> indexes = new HashMap<>();
     private final Map<String, String> columnToIndex = new HashMap<>();
     private long nextRowId = 1;
@@ -41,6 +49,21 @@ public class Table {
     public long getNextRowId() {
         synchronized (lock) {
             return nextRowId;
+        }
+    }
+
+    /**
+     * Advances the internal row-id counter so it is at least {@code nextId}.
+     * Used by Transaction when assigning ids to inserts: without this, the
+     * table's own direct-insert path (Table.insert) could hand out rowIds that
+     * a pending transactional insert is already using, corrupting data.
+     * Only ever moves the counter forward (never rewinds).
+     */
+    void ensureNextRowIdAtLeast(long nextId) {
+        synchronized (lock) {
+            if (nextId > nextRowId) {
+                nextRowId = nextId;
+            }
         }
     }
     
@@ -228,7 +251,7 @@ public class Table {
         Optional<BTree> indexOpt = Optional.empty();
         Filter bestFilter = null;
         
-        // Buscar el mejor índice disponible para cualquier filtro
+        // Look up the best available index for any of the filters
         for (Filter f : filters) {
             if (hasIndex(f.getColumn())) {
                 indexOpt = Optional.of(getIndex(f.getColumn()));
@@ -237,27 +260,27 @@ public class Table {
             }
         }
 
-        // Si hay índice y es un filtro de rango (GT, LT, GTE, LTE, BETWEEN), usarlo
+        // If there is an index and the filter is a range filter (GT, LT, GTE, LTE, BETWEEN), use it
         if (indexOpt.isPresent() && bestFilter != null) {
             BTree index = indexOpt.get();
             List<Long> rowIds;
             final Filter filterToApply = bestFilter;
 
             if (bestFilter.getOperator() == Filter.Operator.EQ) {
-                // Búsqueda exacta en el índice
+                // Exact lookup in the index
                 rowIds = index.search((Comparable) bestFilter.getValue());
             } else if (isRangeOperator(bestFilter.getOperator())) {
-                // Búsqueda por rango usando el índice
+                // Range search using the index
                 rowIds = searchRangeInIndex(index, bestFilter);
             } else {
-                // Otros operadores: fallback a scan completo filtrado
+                // Other operators: fall back to a full filtered scan
                 rowIds = data.values().stream()
                     .filter(r -> filterToApply.apply(r))
                     .map(Row::getRowId)
                     .collect(Collectors.toList());
             }
 
-            // Aplicar todos los filtros restantes a los resultados del índice
+            // Apply all remaining filters to the index results
             List<Row> result = new ArrayList<>();
             for (long id : rowIds) {
                 Row r = data.get(id);
@@ -267,7 +290,7 @@ public class Table {
             }
             return result;
         } else {
-            // Sin índice: escaneo completo
+            // No index: full scan
             return data.values().stream()
                 .filter(r -> matchesAllFilters(r, filters))
                 .collect(Collectors.toList());
@@ -275,7 +298,7 @@ public class Table {
     }
     
     /**
-     * Verifica si el operador es de rango para optimización con índices.
+     * Checks whether the operator is a range operator for index optimization.
      */
     private boolean isRangeOperator(Filter.Operator op) {
         return op == Filter.Operator.GT || op == Filter.Operator.LT || 
@@ -284,39 +307,39 @@ public class Table {
     }
     
     /**
-     * Busca un rango de valores en el índice B-Tree.
-     * Optimizado para lecturas por rango rápidas.
+     * Searches a range of values in the B-Tree index.
+     * Optimized for fast range reads.
      */
     private List<Long> searchRangeInIndex(BTree index, Filter filter) {
         List<Long> result = new ArrayList<>();
         
         switch (filter.getOperator()) {
             case GT:
-                // Obtener todos los valores mayores que el valor dado
+                // Get all values greater than the given value
                 index.traverseInRange((Comparable) filter.getValue(), null, false, true, entry -> {
                     addValuesFromEntry(result, entry);
                 });
                 break;
             case LT:
-                // Obtener todos los valores menores que el valor dado
+                // Get all values less than the given value
                 index.traverseInRange(null, (Comparable) filter.getValue(), true, false, entry -> {
                     addValuesFromEntry(result, entry);
                 });
                 break;
             case GTE:
-                // Obtener todos los valores mayores o iguales
+                // Get all values greater than or equal to the given value
                 index.traverseInRange((Comparable) filter.getValue(), null, true, true, entry -> {
                     addValuesFromEntry(result, entry);
                 });
                 break;
             case LTE:
-                // Obtener todos los valores menores o iguales
+                // Get all values less than or equal to the given value
                 index.traverseInRange(null, (Comparable) filter.getValue(), true, true, entry -> {
                     addValuesFromEntry(result, entry);
                 });
                 break;
             case BETWEEN:
-                // Obtener valores en el rango [min, max]
+                // Get values within the [min, max] range
                 Comparable<?> min = (Comparable<?>) ((Object[]) filter.getValue())[0];
                 Comparable<?> max = (Comparable<?>) ((Object[]) filter.getValue())[1];
                 index.traverseInRange(min, max, true, true, entry -> {
@@ -522,6 +545,9 @@ public class Table {
                                 indexes.get(entry.getValue()).delete((Comparable) val, rowId);
                             }
                         }
+                        // Record tombstone version for time travel
+                        versionManager.createVersion(rowId, removedRow.getValues(), true,
+                            java.time.LocalDateTime.now());
                     }
                 } else {
                     OperationType opType = opTypeMap.getOrDefault(rowId, OperationType.UPDATE);
@@ -563,6 +589,10 @@ public class Table {
                     if (opType == OperationType.INSERT && rowId >= nextRowId) {
                         nextRowId = rowId + 1;
                     }
+                    // Record version for time travel (MVCC chain). Without this,
+                    // rows written through the transactional fluent API had no
+                    // history at all and as-of queries returned nothing.
+                    versionManager.createVersion(rowId, newRow.getValues(), false, null);
                 }
             }
         }
