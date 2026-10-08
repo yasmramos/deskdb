@@ -284,9 +284,19 @@ public class DeskDB implements AutoCloseable {
      */
     public void close() throws IOException {
         if (!closed) {
-            // Guardar SIEMPRE que haya algo persistente (esquema o datos), aunque el
-            // archivo aún no exista: una BD nueva con tablas creadas y cero filas
-            // debe persistir su esquema al cerrar.
+            // Defensive cleanup: remove any transaction still bound to this
+            // thread's ThreadLocal so it does not leak into other DeskDB
+            // instances or tests running on the same thread. Transactions
+            // opened on *other* threads are the responsibility of those
+            // threads (they are rolled back on close()/GC of the tx itself).
+            Transaction tx = currentTransaction.get();
+            if (tx != null && tx.getDb() == this) {
+                currentTransaction.remove();
+            }
+
+            // Always persist when there is something to save (schema or data),
+            // even if the file does not exist yet: a brand-new database with
+            // created tables and zero rows must persist its schema on close.
             if (!inMemoryOnly && hasContentToSave()) {
                 saveToFile();
             }

@@ -30,24 +30,20 @@ public class Transaction implements AutoCloseable {
     private final Wal wal;
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
     private static final AtomicLong transactionIdGenerator = new AtomicLong(0);
-    
-    // Buffer global para agrupar commits de transacciones implícitas
-    private static final java.util.Queue<Transaction> implicitTxBuffer = new java.util.concurrent.ConcurrentLinkedQueue<>();
-    private static volatile boolean flushScheduled = false;
-    private static final Object flushLock = new Object();
-    private static final java.util.concurrent.ExecutorService batchFlushExecutor = 
-        java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
-            Thread t = new Thread(r, "Transaction-Batch-Flush");
-            t.setDaemon(true);
-            return t;
-        });
-    
+
+    // NOTE: A previous "group commit" implementation used a static queue
+    // (implicitTxBuffer) plus a shared background flusher thread. That code was
+    // dead (nothing ever enqueued into the buffer) and dangerous: being static,
+    // it leaked state across DeskDB instances and between tests running in the
+    // same JVM. It has been removed. Implicit transactions now commit
+    // synchronously in commit(), which is correct and deterministic.
+
     private final boolean isImplicit;
-    private boolean flushed = false; // Para evitar doble flush en transacciones bufferizadas
+    private boolean flushed = false; // Prevents double flush on buffered transactions
     private final WriteConcern writeConcern;
 
     public Transaction(DeskDB db) { 
-        this(db, true); // Por defecto es implícita (auto-commit)
+        this(db, true); // Implicit (auto-commit) by default
     }
     
     public Transaction(DeskDB db, boolean isImplicit) {
@@ -59,16 +55,16 @@ public class Transaction implements AutoCloseable {
         this.isImplicit = isImplicit;
         this.writeConcern = writeConcern;
         this.transactionId = transactionIdGenerator.incrementAndGet();
-        this.wal = db.getWal(); // Obtener WAL de la base de datos
+        this.wal = db.getWal(); // Obtain the database's WAL (may be null in in-memory mode)
         
-        // OPTIMIZACIÓN CRÍTICA: Eliminar snapshot completo para mejorar rendimiento en batches.
-        // Solo inicializamos mapas vacíos para pendingChanges.
-        // Se elimina la copia O(N) de datos al iniciar transacción.
+        // CRITICAL OPTIMIZATION: removed the full snapshot copy to improve batch performance.
+        // Only initialize empty maps for pendingChanges.
+        // The O(N) data copy at transaction start is eliminated.
         for (Map.Entry<String, Table> entry : db.getTables().entrySet()) {
             pendingChanges.put(entry.getKey(), new HashMap<>());
         }
         
-        // Escribir inicio de transacción en WAL
+        // Write transaction start record to the WAL
         if (wal != null) {
             try {
                 wal.write(transactionId, OperationType.CHECKPOINT, "", "BEGIN", new byte[0]);
@@ -92,158 +88,36 @@ public class Transaction implements AutoCloseable {
 
     public void commit() {
         if (!active) throw new IllegalStateException("Transaction already closed");
-        
-        // Para transacciones implícitas, usar batching síncrono inmediato
-        if (isImplicit && !flushed) {
-            // Ejecutar commit inmediatamente pero con optimización de batch
-            lock.writeLock().lock();
-            try {
-                doCommit();
-                
-                active = false;
-                committed = true;
-                flushed = true;
-                
-                // Liberar la transacción del ThreadLocal
-                if (db.getCurrentTransaction() == this) {
-                    db.releaseCurrentTransaction();
-                }
-                
-                logger.debug("Transaction {} committed immediately", transactionId);
-            } finally {
-                lock.writeLock().unlock();
-            }
-            return;
-        }
-        
-        // Para transacciones explícitas, commit inmediato
+
+        // All transactions (implicit or explicit) commit synchronously here.
+        // The "flushed" flag only guards against a double flush left over from
+        // the removed group-commit buffer; it is false unless this transaction
+        // was already committed, which the "active" check above prevents.
         lock.writeLock().lock();
         try {
             doCommit();
-            
+
             active = false;
             committed = true;
-            
-            // Liberar la transacción del ThreadLocal si es la activa
+            flushed = true;
+
+            // Release the transaction from the ThreadLocal if it is the active one
             if (db.getCurrentTransaction() == this) {
                 db.releaseCurrentTransaction();
             }
-            
+
             logger.info("Transaction {} committed successfully", transactionId);
         } finally {
             lock.writeLock().unlock();
         }
     }
     
-    /**
-     * Procesa un lote de transacciones implícitas agrupadas
-     */
-    private void processBatch() {
-        List<Transaction> batch = new ArrayList<>();
-        synchronized (flushLock) {
-            // Recoger hasta 100 transacciones o las que haya disponibles
-            while (!implicitTxBuffer.isEmpty() && batch.size() < 100) {
-                Transaction tx = implicitTxBuffer.poll();
-                if (tx != null && !tx.flushed) {
-                    batch.add(tx);
-                }
-            }
-            flushScheduled = false;
-        }
-        
-        if (batch.isEmpty()) {
-            return;
-        }
-        
-        // Ejecutar commits en batch dentro de una sola escritura WAL
-        Wal wal = db.getWal();
-        if (wal != null) {
-            try {
-                // Escribir todas las operaciones de todas las transacciones del batch
-                for (Transaction tx : batch) {
-                    tx.lock.writeLock().lock();
-                    try {
-                        if (tx.pendingChanges.isEmpty()) {
-                            continue;
-                        }
-                        
-                        // Escribir operaciones de esta transacción
-                        for (Map.Entry<String, Map<Long, Row>> entry : tx.pendingChanges.entrySet()) {
-                            String tableName = entry.getKey();
-                            Map<Long, OperationType> opTypeMap = tx.operationTypes.getOrDefault(tableName, new HashMap<>());
-                            
-                            for (Map.Entry<Long, Row> changeEntry : entry.getValue().entrySet()) {
-                                OperationType opType;
-                                byte[] data = new byte[0];
-                                
-                                if (changeEntry.getValue() == null) {
-                                    opType = OperationType.DELETE;
-                                } else {
-                                    Row row = changeEntry.getValue();
-                                    // Use tracked operation type instead of snapshot lookup
-                                    opType = opTypeMap.getOrDefault(changeEntry.getKey(), OperationType.UPDATE);
-                                    data = com.deskdb.util.Serializer.serialize(row.getValues());
-                                }
-                                
-                                wal.write(tx.transactionId, opType, tableName, String.valueOf(changeEntry.getKey()), data);
-                            }
-                        }
-                        
-                        // Escribir COMMIT para esta transacción
-                        wal.write(tx.transactionId, OperationType.COMMIT, "", "", new byte[0]);
-                        
-                        // Aplicar cambios a las tablas usando batch operations
-                        for (Map.Entry<String, Map<Long, Row>> entry : tx.pendingChanges.entrySet()) {
-                            String tableName = entry.getKey();
-                            Table table = tx.db.getTable(tableName);
-                            if (table != null) {
-                                // Apply all changes for this table in a single batch operation
-                                table.applyBatch(entry.getValue(), tx.operationTypes.getOrDefault(tableName, new HashMap<>()));
-                            }
-                        }
-                        
-                        // Apply write concern for this transaction: only flush if SAFE mode
-                        if (tx.writeConcern == WriteConcern.SAFE) {
-                            wal.flush(); // Force fsync for SAFE mode
-                            logger.info("Transaction {} committed with SAFE durability", tx.transactionId);
-                        } else {
-                            // NORMAL or ASYNC: skip immediate flush for better performance
-                            logger.info("Transaction {} committed with {} durability", tx.transactionId, tx.writeConcern);
-                        }
-                    } finally {
-                        tx.lock.writeLock().unlock();
-                    }
-                }
-                
-                // Flush unico para todo el batch si alguna transaccion es SAFE
-                boolean anySafe = false;
-                for (Transaction t : batch) {
-                    if (t.writeConcern == WriteConcern.SAFE) {
-                        anySafe = true;
-                        break;
-                    }
-                }
-                if (anySafe) {
-                    wal.flush();
-                }
-                logger.info("Batch commit completed: {} transactions", batch.size());
-                
-            } catch (IOException e) {
-                logger.error("Failed to commit batch: {}", e.getMessage());
-                // Marcar transacciones como no commitidas
-                for (Transaction tx : batch) {
-                    tx.committed = false;
-                }
-            }
-        }
-    }
-    
     private void doCommit() {
-        // Verificar conflictos con otras transacciones (optimistic concurrency control)
-        // En una implementación completa, se verificaría si las filas leídas/modificadas
-        // han cambiado desde el snapshot inicial
+        // Check conflicts with other transactions (optimistic concurrency control)
+        // In a complete implementation, this would verify whether the rows read/modified
+        // have changed since the initial snapshot
         
-        // Escribir todas las operaciones pendientes en WAL antes de aplicar cambios
+        // Write all pending operations to the WAL before applying changes
         if (wal != null) {
             try {
                 for (Map.Entry<String, Map<Long, Row>> entry : pendingChanges.entrySet()) {
@@ -255,7 +129,7 @@ public class Transaction implements AutoCloseable {
                         byte[] data = new byte[0];
                         
                         if (changeEntry.getValue() == null) {
-                            // Eliminación
+                            // Deletion
                             opType = OperationType.DELETE;
                         } else {
                             Row row = changeEntry.getValue();
@@ -268,15 +142,15 @@ public class Transaction implements AutoCloseable {
                     }
                 }
                 
-                // Escribir COMMIT en WAL según nivel de WriteConcern
-                // SAFE: fsync inmediato para durabilidad estricta
-                // NORMAL: bufferizado para group commit (fsync batcheado)
-                // ASYNC: bufferizado sin fsync (solo memoria del SO)
+                // Write COMMIT to the WAL according to the WriteConcern level
+                // SAFE: immediate fsync for strict durability
+                // NORMAL: buffered for group commit (batched fsync)
+                // ASYNC: buffered without fsync (OS memory only)
                 boolean forceSync = (writeConcern == WriteConcern.SAFE);
                 wal.writeCommit(transactionId, forceSync);
                 
-                // Para NORMAL mode, el flush periódico se encarga de persistir los commits bufferizados
-                // El thread de background en Wal.startPeriodicFlush() hace flush cada FLUSH_INTERVAL_MS
+                // In NORMAL mode, the periodic flush persists the buffered commits
+                // The background thread in Wal.startPeriodicFlush() flushes every FLUSH_INTERVAL_MS
                 
             } catch (IOException e) {
                 logger.error("Failed to write to WAL during commit: {}", e.getMessage());
@@ -284,23 +158,25 @@ public class Transaction implements AutoCloseable {
             }
         }
         
-        // Aplicar cambios pendientes a las tablas reales usando batch operations
-        for (Map.Entry<String, Map<Long, Row>> entry : pendingChanges.entrySet()) {
-            String tableName = entry.getKey();
+        // Apply pending changes to the real tables using batch operations.
+        // Deterministic order by table name: HashMap iteration order is not stable,
+        // which made MVCC version chains and assigned row ids vary across
+        // executions with the same operation script.
+        List<String> sortedTableNames = new ArrayList<>(pendingChanges.keySet());
+        java.util.Collections.sort(sortedTableNames);
+        for (String tableName : sortedTableNames) {
+            Map<Long, Row> tableChanges = pendingChanges.get(tableName);
+            if (tableChanges == null || tableChanges.isEmpty()) {
+                continue; // nothing to apply for this table
+            }
             Table table = db.getTable(tableName);
             if (table != null) {
                 // Apply all changes for this table in a single batch operation
-                table.applyBatch(entry.getValue(), operationTypes.getOrDefault(tableName, new HashMap<>()));
+                table.applyBatch(tableChanges, operationTypes.getOrDefault(tableName, new HashMap<>()));
             }
         }
     }
     
-    private void flushImplicitBuffer() {
-        // Método obsoleto - ahora se usa processBatch()
-        // Se mantiene por compatibilidad pero no hace nada
-        logger.debug("flushImplicitBuffer deprecated - using batch processing instead");
-    }
-
     public void rollback() {
         if (!active || committed) return;
         
@@ -332,7 +208,7 @@ public class Transaction implements AutoCloseable {
     }
     
     /**
-     * Obtiene los cambios pendientes de una tabla dentro de esta transacción.
+     * Gets the pending changes for a table within this transaction.
      */
     Map<Long, Row> getPendingChanges(String tableName) {
         return pendingChanges.getOrDefault(tableName, new HashMap<>());
@@ -347,7 +223,7 @@ public class Transaction implements AutoCloseable {
         
         // Initialize pendingChanges map if not exists (no snapshot copy needed)
         if (!pendingChanges.containsKey(tableName)) {
-            pendingChanges.put(tableName, new HashMap<>());
+            pendingChanges.put(tableName, new java.util.TreeMap<>());
         }
         
         Map<Long, Row> changes = pendingChanges.get(tableName);
@@ -375,18 +251,13 @@ public class Transaction implements AutoCloseable {
                 opTypeMap.put(nextId, OperationType.INSERT);
                 nextRowIds.put(tableName, nextId + 1);
                 
-                // CRITICAL: Update table's nextRowId immediately to ensure consistency
-                // This prevents ID collisions when multiple implicit transactions run
+                // CRITICAL: Reserve the id in the table's counter immediately so
+                // concurrent direct inserts (Table.insert) never hand out a rowId
+                // already claimed by this pending transactional insert.
                 if (!db.isClosed()) {
                     Table table = db.getTable(tableName);
                     if (table != null) {
-                        synchronized(table) {
-                            long tableNextId = table.getNextRowId();
-                            if (nextId >= tableNextId) {
-                                // Use reflection or direct access to update table's counter
-                                // Since we can't modify Table here, we'll ensure it's updated on commit
-                            }
-                        }
+                        table.ensureNextRowIdAtLeast(nextId + 1);
                     }
                 }
             } else {
@@ -431,13 +302,13 @@ public class Transaction implements AutoCloseable {
             return;
         }
         
-        // Agrupar entradas por transacción
+        // Group entries by transaction
         Map<Long, List<Wal.WalEntry>> transactions = new HashMap<>();
         for (Wal.WalEntry entry : entries) {
             transactions.computeIfAbsent(entry.transactionId, k -> new ArrayList<>()).add(entry);
         }
         
-        // Aplicar transacciones en orden
+        // Apply transactions in order
         for (Map.Entry<Long, List<Wal.WalEntry>> txEntry : transactions.entrySet()) {
             long txId = txEntry.getKey();
             logger.info("Replaying transaction {}", txId);
@@ -461,7 +332,7 @@ public class Transaction implements AutoCloseable {
                         case UPDATE:
                             Map<String, Object> updateData = com.deskdb.util.Serializer.deserialize(entry.data);
                             long rowId = Long.parseLong(entry.key);
-                            // Actualizar fila existente
+                            // Update existing row
                             Map<Long, Row> tableData = table.getData();
                             Row existingRow = tableData.get(rowId);
                             if (existingRow != null) {
@@ -482,7 +353,7 @@ public class Transaction implements AutoCloseable {
                     }
                 } catch (IOException e) {
                     logger.error("Error replaying entry: {}", e.getMessage());
-                    throw e; // Re-lanzar para que el caller lo maneje
+                    throw e; // Rethrow so the caller can handle it
                 }
             }
         }
@@ -491,21 +362,21 @@ public class Transaction implements AutoCloseable {
     }
     
     /**
-     * Ejecuta un SELECT dentro de esta transacción, leyendo desde el estado actual + cambios pendientes.
-     * OPTIMIZACIÓN: No se copia el snapshot completo. Se lee directamente de la tabla y se aplican
-     * los cambios pendientes en memoria.
+     * Executes a SELECT within this transaction, reading from the current state plus pending changes.
+     * OPTIMIZATION: the full snapshot is not copied. Rows are read directly from the table and
+     * pending in-memory changes are applied on top.
      */
     public List<Row> select(String tableName, List<Filter> filters) throws Exception {
         Table table = db.getTable(tableName);
         Map<Long, Row> baseData = (table != null) ? table.getData() : new HashMap<>();
         Map<Long, Row> changes = pendingChanges.getOrDefault(tableName, new HashMap<>());
         
-        // Combinar datos base con cambios pendientes sin copiar todo el snapshot
-        // Solo creamos un mapa efectivo con las filas que vamos a leer
+        // Combine base data with pending changes without copying the whole snapshot
+        // Only build an effective map with the rows we are going to read
         Map<Long, Row> effectiveData;
         
         if (filters == null || filters.isEmpty()) {
-            // SELECT *: necesitamos todas las filas
+            // SELECT *: we need all rows
             effectiveData = new HashMap<>(baseData);
             for (Map.Entry<Long, Row> entry : changes.entrySet()) {
                 if (entry.getValue() == null) {
@@ -516,17 +387,17 @@ public class Transaction implements AutoCloseable {
             }
             return new ArrayList<>(effectiveData.values());
         } else {
-            // SELECT con filtros: evaluamos sobre la combinación sin materializar todo
+            // Filtered SELECT: evaluate over the combination without materializing everything
             List<Row> result = new ArrayList<>();
             
-            // Primero aplicar cambios pendientes que coincidan
+            // First apply matching pending changes
             for (Map.Entry<Long, Row> entry : changes.entrySet()) {
                 if (entry.getValue() != null && matchesAllFilters(entry.getValue(), filters)) {
                     result.add(entry.getValue());
                 }
             }
             
-            // Luego filas base no modificadas por la transacción
+            // Then base rows not modified by the transaction
             for (Map.Entry<Long, Row> entry : baseData.entrySet()) {
                 if (!changes.containsKey(entry.getKey()) && matchesAllFilters(entry.getValue(), filters)) {
                     result.add(entry.getValue());
