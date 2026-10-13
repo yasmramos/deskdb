@@ -48,6 +48,23 @@ public class BinarySerializer {
     /** Type marker for LIST containers */
     private static final byte TYPE_LIST = -2;
 
+    // Códigos de tipo EXPLÍCITOS y estables por contrato (no ordinal() del enum DataType).
+    // El formato en disco/wal debe sobrevivir a reordenamientos o inserciones en DataType.
+    // Mismo esquema canónico usado por DeskDB en el archivo .deskdb v1. ¡NO REUTILIZAR NUNCA un código!
+    static final byte T_BOOLEAN = 6;
+    static final byte T_INT = 2;
+    static final byte T_LONG = 3;
+    static final byte T_DOUBLE = 4;
+    static final byte T_STRING = 1;
+    static final byte T_DECIMAL = 5;
+    static final byte T_DATE = 7;
+    static final byte T_TIMESTAMP = 8;
+    static final byte T_BLOB = 9;
+    static final byte T_JSON = 10;
+    static final byte T_LOCALDATE = 11;
+    static final byte T_LOCALTIME = 12;
+    static final byte T_LOCALDATETIME = 13;
+
     /**
      * Serializes an object to a byte array.
      * Only serializes non-transient, non-static fields.
@@ -154,44 +171,56 @@ public class BinarySerializer {
         if (value == null) {
             dos.writeByte(TYPE_NULL);
         } else if (value instanceof Boolean) {
-            dos.writeByte(DataType.BOOLEAN.ordinal());
+            dos.writeByte(T_BOOLEAN);
             dos.writeBoolean((Boolean) value);
         } else if (value instanceof Integer) {
-            dos.writeByte(DataType.INT.ordinal());
+            dos.writeByte(T_INT);
             dos.writeInt((Integer) value);
         } else if (value instanceof Long) {
-            dos.writeByte(DataType.LONG.ordinal());
+            dos.writeByte(T_LONG);
             dos.writeLong((Long) value);
         } else if (value instanceof Double) {
-            dos.writeByte(DataType.DOUBLE.ordinal());
+            dos.writeByte(T_DOUBLE);
             dos.writeDouble((Double) value);
         } else if (value instanceof String) {
-            dos.writeByte(DataType.STRING.ordinal());
+            dos.writeByte(T_STRING);
             byte[] strBytes = ((String) value).getBytes(StandardCharsets.UTF_8);
             dos.writeInt(strBytes.length);
             dos.write(strBytes);
         } else if (value instanceof BigDecimal) {
             // Efficient binary serialization for BigDecimal
-            dos.writeByte(DataType.DECIMAL.ordinal());
+            dos.writeByte(T_DECIMAL);
             BigDecimal bd = (BigDecimal) value;
             dos.writeInt(bd.scale());
             byte[] unscaled = bd.unscaledValue().toByteArray();
             dos.writeInt(unscaled.length);
             dos.write(unscaled);
-        } else if (value instanceof java.util.Date) {
-            dos.writeByte(DataType.DATE.ordinal());
-            dos.writeLong(((java.util.Date) value).getTime());
         } else if (value instanceof java.sql.Timestamp) {
-            dos.writeByte(DataType.TIMESTAMP.ordinal());
+            // IMPORTANTE: Timestamp extiende java.util.Date -> DEBE comprobarse ANTES
+            // que Date para no perder los nanosegundos.
+            dos.writeByte(T_TIMESTAMP);
             dos.writeLong(((java.sql.Timestamp) value).getTime());
             dos.writeInt(((java.sql.Timestamp) value).getNanos());
+        } else if (value instanceof java.util.Date) {
+            dos.writeByte(T_DATE);
+            dos.writeLong(((java.util.Date) value).getTime());
+        } else if (value instanceof java.time.LocalDateTime) {
+            dos.writeByte(T_LOCALDATETIME);
+            dos.writeInt(Math.toIntExact(((java.time.LocalDateTime) value).toLocalDate().toEpochDay()));
+            dos.writeLong(((java.time.LocalDateTime) value).toLocalTime().toNanoOfDay());
+        } else if (value instanceof java.time.LocalDate) {
+            dos.writeByte(T_LOCALDATE);
+            dos.writeInt(Math.toIntExact(((java.time.LocalDate) value).toEpochDay()));
+        } else if (value instanceof java.time.LocalTime) {
+            dos.writeByte(T_LOCALTIME);
+            dos.writeLong(((java.time.LocalTime) value).toNanoOfDay());
         } else if (value instanceof byte[]) {
-            dos.writeByte(DataType.BLOB.ordinal());
+            dos.writeByte(T_BLOB);
             byte[] blobData = (byte[]) value;
             dos.writeInt(blobData.length);
             dos.write(blobData);
         } else if (value instanceof UUID) {
-            dos.writeByte(DataType.STRING.ordinal());
+            dos.writeByte(T_STRING);
             String uuidStr = ((UUID) value).toString();
             byte[] strBytes = uuidStr.getBytes(StandardCharsets.UTF_8);
             dos.writeInt(strBytes.length);
@@ -205,8 +234,8 @@ public class BinarySerializer {
             }
         } else {
             // Fail-fast: throw exception for unsupported types instead of silent corruption
-            throw new IOException("Unsupported type for serialization: " + value.getClass().getName() + 
-                ". Supported types are: String, Integer, Long, Double, Boolean, BigDecimal, Date, Timestamp, byte[], UUID, List");
+            throw new IOException("Unsupported type for serialization: " + value.getClass().getName() +
+                ". Supported types are: String, Integer, Long, Double, Boolean, BigDecimal, Date, Timestamp, LocalDate, LocalTime, LocalDateTime, byte[], UUID, List");
         }
     }
 
@@ -228,50 +257,52 @@ public class BinarySerializer {
             return list;
         }
         
-        // Handle DataType enum ordinals
-        if (type < 0 || type >= DataType.values().length) {
-            throw new IOException("Unknown or unsupported data type ordinal: " + type);
-        }
-        
-        DataType dataType = DataType.values()[type];
-        switch (dataType) {
-            case BOOLEAN:
+        // Códigos de tipo EXPLÍCITOS (estables por contrato; ver T_* arriba).
+        switch (type) {
+            case T_BOOLEAN:
                 return dis.readBoolean();
-            case INT:
+            case T_INT:
                 return dis.readInt();
-            case LONG:
+            case T_LONG:
                 return dis.readLong();
-            case DOUBLE:
+            case T_DOUBLE:
                 return dis.readDouble();
-            case STRING:
-            case JSON: // JSON is stored as string
+            case T_STRING:
+            case T_JSON: // JSON se almacena como string
                 int lenStr = dis.readInt();
                 byte[] strBytes = new byte[lenStr];
                 dis.readFully(strBytes);
                 return new String(strBytes, StandardCharsets.UTF_8);
-            case DECIMAL:
+            case T_DECIMAL:
                 // Efficient binary deserialization for BigDecimal
                 int scale = dis.readInt();
                 int lenBd = dis.readInt();
                 byte[] unscaledBytes = new byte[lenBd];
                 dis.readFully(unscaledBytes);
                 return new BigDecimal(new BigInteger(unscaledBytes), scale);
-            case DATE:
+            case T_DATE:
                 long dateMillis = dis.readLong();
                 return new java.util.Date(dateMillis);
-            case TIMESTAMP:
+            case T_TIMESTAMP:
                 long tsMillis = dis.readLong();
                 int nanos = dis.readInt();
                 java.sql.Timestamp ts = new java.sql.Timestamp(tsMillis);
                 ts.setNanos(nanos);
                 return ts;
-            case BLOB:
+            case T_LOCALDATE:
+                return java.time.LocalDate.ofEpochDay(dis.readInt());
+            case T_LOCALTIME:
+                return java.time.LocalTime.ofNanoOfDay(dis.readLong());
+            case T_LOCALDATETIME:
+                return java.time.LocalDateTime.of(java.time.LocalDate.ofEpochDay(dis.readInt()),
+                        java.time.LocalTime.ofNanoOfDay(dis.readLong()));
+            case T_BLOB:
                 int blobLen = dis.readInt();
                 byte[] blobData = new byte[blobLen];
                 dis.readFully(blobData);
                 return blobData;
             default:
-                throw new IOException("Unknown or unsupported data type: " + dataType);
+                throw new IOException("Unknown or unsupported data type code: " + type);
         }
     }
 
@@ -292,54 +323,59 @@ public class BinarySerializer {
             return;
         }
         
-        // Handle DataType enum ordinals
-        if (type < 0 || type >= DataType.values().length) {
-            throw new IOException("Unknown or unsupported data type ordinal during skip: " + type);
-        }
-        
-        DataType dataType = DataType.values()[type];
-        switch (dataType) {
-            case BOOLEAN:
+        // Códigos de tipo EXPLÍCITOS (mismo esquema que writeValue/readValue)
+        switch (type) {
+            case T_BOOLEAN:
                 dis.readBoolean();
                 break;
-            case INT:
+            case T_INT:
                 dis.readInt();
                 break;
-            case LONG:
+            case T_LONG:
                 dis.readLong();
                 break;
-            case DOUBLE:
+            case T_DOUBLE:
                 dis.readDouble();
                 break;
-            case STRING:
-            case JSON:
+            case T_STRING:
+            case T_JSON:
                 int lenStr = dis.readInt();
                 // Use readFully to guarantee all bytes are read (skipBytes doesn't guarantee full skip)
                 byte[] discardStr = new byte[lenStr];
                 dis.readFully(discardStr);
                 break;
-            case DECIMAL:
+            case T_DECIMAL:
                 // Skip scale and unscaled value length
                 dis.readInt(); // scale
                 int lenBd = dis.readInt();
                 byte[] discardBd = new byte[lenBd];
                 dis.readFully(discardBd);
                 break;
-            case DATE:
+            case T_DATE:
                 dis.readLong();
                 break;
-            case TIMESTAMP:
+            case T_TIMESTAMP:
                 dis.readLong(); // millis
                 dis.readInt();  // nanos
                 break;
-            case BLOB:
+            case T_LOCALDATE:
+                dis.readInt(); // epochDay
+                break;
+            case T_LOCALTIME:
+                dis.readLong(); // nanoOfDay
+                break;
+            case T_LOCALDATETIME:
+                dis.readInt();  // epochDay
+                dis.readLong(); // nanoOfDay
+                break;
+            case T_BLOB:
                 int blobLen = dis.readInt();
                 // Use readFully to guarantee all bytes are read
                 byte[] discardBlob = new byte[blobLen];
                 dis.readFully(discardBlob);
                 break;
             default:
-                throw new IOException("Unknown or unsupported data type during skip: " + dataType);
+                throw new IOException("Unknown or unsupported data type code during skip: " + type);
         }
     }
 
